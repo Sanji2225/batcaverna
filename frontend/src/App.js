@@ -108,7 +108,7 @@ const App = () => {
           </button>
 
           <label style={{ display: 'inline-flex', alignItems: 'center', fontWeight: 'bold' }}>
-            Taxa de Aprendizado:
+            Valor de Alpha (Taxa de Aprendizado):
             <input
               type="number" step="0.01" value={learningRate}
               onChange={(e) => {
