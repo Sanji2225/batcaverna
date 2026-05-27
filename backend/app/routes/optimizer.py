@@ -54,20 +54,52 @@ def otimizar_direcoes_aleatorias():
     dados_math = validacao['dados_matematicos']
     objetivo = validacao['objetivo']
 
-    # ==============================================================
-    # AQUI ENTRARÁ A LÓGICA FUTURA DO MÉTODO DE DIREÇÕES ALEATÓRIAS
-    # Exemplo: 
-    # resultado_final = rodar_direcoes_aleatorias(dados_math['parsed_expression'], objetivo)
-    # ==============================================================
+@optimizer_bp.route('/direcoes-aleatorias', methods=['POST'])
+def otimizar_direcoes_aleatorias():
+    dados = request.json
+    validacao = pre_processamento(dados)
 
-    # Retorno temporário (Mock) para o Frontend testar
-    return jsonify({
-        "status": "sucesso",
-        "metodo": "Direções Aleatórias",
-        "objetivo": objetivo.upper(),
-        "mensagem": "Função não linear validada. (Cálculo real do algoritmo será implementado aqui)",
-        "dados_interpretados": dados_math
-    }), 200
+    if not validacao['valido']:
+        return jsonify(validacao['resposta']), validacao['codigo']
+
+    dados_math = validacao['dados_matematicos']
+    objetivo = validacao['objetivo']
+
+    parametros = dados.get('parametros', {})
+    step_size = parametros.get('step_size', 0.1)
+    max_iter = parametros.get('max_iter', 1000)
+    x_inicial = parametros.get('x_inicial', None)
+
+    try:
+        # Extrai (e remove do dicionário) os objetos SymPy puros
+        expressao_sympy = dados_math.pop('sympy_expr')
+        variaveis_sympy = dados_math.pop('sympy_vars')
+
+        # Executa o cálculo com os objetos 
+        resultado_otimizacao = rodar_direcoes_aleatorias(
+            expressao_sympy=expressao_sympy,
+            variaveis_sympy=variaveis_sympy,
+            objetivo=objetivo,
+            x_inicial=x_inicial,
+            step_size=step_size,
+            max_iter=max_iter
+        )
+
+        # Retorna o JSON. 
+        return jsonify({
+            "status": "sucesso",
+            "metodo": "Direções Aleatórias",
+            "objetivo": objetivo.upper(),
+            "dados_interpretados": dados_math, 
+            "resultado": resultado_otimizacao
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "erro",
+            "error": "Falha interna ao executar o algoritmo de otimização.",
+            "detalhes": str(e)
+        }), 500
 
 
 @optimizer_bp.route('/gradiente', methods=['POST'])
@@ -91,6 +123,10 @@ def otimizar_gradiente():
     # resultado_final = rodar_descida_ascensao_gradiente(dados_math['parsed_expression'], objetivo)
     # ==============================================================
 
+# Remove os objetos SymPy para não dar erro no retorno temporário
+    dados_math.pop('sympy_expr', None)
+    dados_math.pop('sympy_vars', None)
+    
     # Retorno temporário (Mock) para o Frontend testar
     return jsonify({
         "status": "sucesso",
