@@ -85,7 +85,12 @@ def rodar_direcoes_aleatorias(expressao_str, vars_str_list, objetivo, x_inicial=
         x_novo = [x_atual[i] + step_size * direcao_normalizada[i] for i in range(n_vars)]
         
         # Avalia a função no novo ponto
-        f_novo = func(*x_novo)
+        try:
+            f_novo = func(*x_novo)
+        except (ValueError, ZeroDivisionError):
+            # Se o ponto cair fora do domínio (ex: raiz de número negativo, divisão por zero)
+            # ignora esta direção e tenta a próxima
+            continue
 
         # Verifica se o novo ponto melhora o objetivo
         melhorou = (f_novo > f_atual) if is_max else (f_novo < f_atual)
