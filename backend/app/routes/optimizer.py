@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from app.services.math_engine import process_latex_function
+from app.services.math_engine import process_latex_function, rodar_direcoes_aleatorias
 
 optimizer_bp = Blueprint('optimizer', __name__)
 
@@ -38,21 +38,6 @@ def pre_processamento(dados):
     except Exception as e:
         return {"valido": False, "codigo": 500, "resposta": {"error": "Erro interno no processamento matemático.", "details": str(e)}}
 
-
-@optimizer_bp.route('/direcoes-aleatorias', methods=['POST'])
-def otimizar_direcoes_aleatorias():
-    """
-    Endpoint: POST /api/optimizer/direcoes-aleatorias
-    Payload esperado: {"funcao_latex": "...", "objetivo": "max" ou "min"}
-    """
-    dados = request.json
-    validacao = pre_processamento(dados)
-
-    if not validacao['valido']:
-        return jsonify(validacao['resposta']), validacao['codigo']
-
-    dados_math = validacao['dados_matematicos']
-    objetivo = validacao['objetivo']
 
 @optimizer_bp.route('/direcoes-aleatorias', methods=['POST'])
 def otimizar_direcoes_aleatorias():
@@ -123,7 +108,7 @@ def otimizar_gradiente():
     # resultado_final = rodar_descida_ascensao_gradiente(dados_math['parsed_expression'], objetivo)
     # ==============================================================
 
-# Remove os objetos SymPy para não dar erro no retorno temporário
+    # Remove os objetos SymPy para não dar erro no retorno temporário
     dados_math.pop('sympy_expr', None)
     dados_math.pop('sympy_vars', None)
     
