@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from app.services.math_engine import process_latex_function, rodar_direcoes_aleatorias, rodar_gradiente
+from app.services.math_engine import process_latex_function, rodar_direcoes_aleatorias, rodar_gradiente, gerar_grid
 
 optimizer_bp = Blueprint('optimizer', __name__)
 
@@ -61,11 +61,11 @@ def otimizar_direcoes_aleatorias():
     x_inicial = parametros.get('x_inicial', None)
 
     try:
-        # Extrai (e remove do dicionário) os objetos SymPy puros
-        expressao_sympy = dados_math.pop('sympy_expr')
-        variaveis_sympy = dados_math.pop('sympy_vars')
+        # Extrai os objetos SymPy
+        expressao_sympy = dados_math['sympy_expr']
+        variaveis_sympy = dados_math['sympy_vars']
 
-        # Executa o cálculo com os objetos 
+        # Executa o cálculo
         resultado_otimizacao = rodar_direcoes_aleatorias(
             expressao_sympy=expressao_sympy,
             variaveis_sympy=variaveis_sympy,
@@ -75,18 +75,21 @@ def otimizar_direcoes_aleatorias():
             max_iter=max_iter
         )
 
-        # Retorna o JSON. 
+        grid = gerar_grid(expressao_sympy, variaveis_sympy)
+
         return jsonify({
-            "status": "sucesso",
-            "metodo": "Direções Aleatórias",
-            "objetivo": objetivo.upper(),
-            "dados_interpretados": dados_math, 
-            "resultado": resultado_otimizacao
+            "success": True,
+            "data": {
+                "method": "Direções Aleatórias",
+                "objetivo": objetivo.upper(),
+                "result": resultado_otimizacao,
+                "grid": grid
+            }
         }), 200
 
     except Exception as e:
         return jsonify({
-            "status": "erro",
+            "success": False,
             "error": "Falha interna ao executar o algoritmo de otimização.",
             "detalhes": str(e)
         }), 500
@@ -96,17 +99,6 @@ def otimizar_direcoes_aleatorias():
 def otimizar_gradiente():
     """
     Endpoint: POST /api/optimizer/gradiente
-    Payload esperado:
-    {
-        "funcao_latex": "...",
-        "objetivo": "max" ou "min",
-        "parametros": {
-            "learning_rate": 0.1,
-            "max_iter": 1000,
-            "x_inicial": [0, 0],
-            "tolerancia": 1e-6
-        }
-    }
     """
     dados = request.json
     validacao = pre_processamento(dados)
@@ -118,39 +110,38 @@ def otimizar_gradiente():
     objetivo = validacao['objetivo']
 
     parametros = dados.get('parametros', {})
-    learning_rate = parametros.get('learning_rate', 0.1)
-    max_iter = parametros.get('max_iter', 1000)
-    x_inicial = parametros.get('x_inicial', None)
-    tolerancia = parametros.get('tolerancia', 1e-6)
+    step_size = parametros.get('step_size', 0.1)
+    max_iter = parametros.get('max_iter', 100)
 
     try:
-        # Extrai (e remove do dicionário) os objetos SymPy puros
-        expressao_sympy = dados_math.pop('sympy_expr')
-        variaveis_sympy = dados_math.pop('sympy_vars')
+        expressao_sympy = dados_math['sympy_expr']
+        variaveis_sympy = dados_math['sympy_vars']
 
-        # Executa o cálculo com os objetos
-        resultado_otimizacao = rodar_gradiente(
+        # Executa o Gradiente
+        resultado = rodar_gradiente(
             expressao_sympy=expressao_sympy,
             variaveis_sympy=variaveis_sympy,
             objetivo=objetivo,
-            x_inicial=x_inicial,
-            learning_rate=learning_rate,
-            max_iter=max_iter,
-            tolerancia=tolerancia
+            step_size=step_size,
+            max_iter=max_iter
         )
 
-        # Retorna o JSON.
+        # Gera o Grid para o gráfico
+        grid = gerar_grid(expressao_sympy, variaveis_sympy)
+
         return jsonify({
-            "status": "sucesso",
-            "metodo": "Gradiente",
-            "objetivo": objetivo.upper(),
-            "dados_interpretados": dados_math,
-            "resultado": resultado_otimizacao
+            "success": True,
+            "data": {
+                "path": resultado['path'],
+                "iterations": resultado['iterations'],
+                "grid": grid,
+                "ponto_otimo": resultado['ponto_otimo'],
+                "valor_otimo": resultado['valor_otimo']
+            }
         }), 200
 
     except Exception as e:
         return jsonify({
-            "status": "erro",
-            "error": "Falha interna ao executar o algoritmo de otimização.",
-            "detalhes": str(e)
+            "success": False,
+            "error": str(e)
         }), 500
