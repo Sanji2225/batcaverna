@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from app.services.math_engine import process_latex_function, rodar_direcoes_aleatorias
+from app.services.math_engine import process_latex_function, rodar_direcoes_aleatorias, rodar_gradiente
 
 optimizer_bp = Blueprint('optimizer', __name__)
 
@@ -21,13 +21,18 @@ def pre_processamento(dados):
         resultado_math = process_latex_function(latex_str)
 
         if resultado_math['is_linear']:
+            # Remove os objetos SymPy puros (não serializáveis em JSON) dos detalhes
+            detalhes_serializaveis = {
+                chave: valor for chave, valor in resultado_math.items()
+                if chave not in ('sympy_expr', 'sympy_vars')
+            }
             return {
                 "valido": False, 
                 "codigo": 400, 
                 "resposta": {
                     "error": "Modelo Linear detectado.",
                     "message": "Os métodos de otimização suportam exclusivamente funções não lineares.",
-                    "detalhes": resultado_math
+                    "detalhes": detalhes_serializaveis
                 }
             }
             
@@ -91,7 +96,17 @@ def otimizar_direcoes_aleatorias():
 def otimizar_gradiente():
     """
     Endpoint: POST /api/optimizer/gradiente
-    Payload esperado: {"funcao_latex": "...", "objetivo": "max" ou "min"}
+    Payload esperado:
+    {
+        "funcao_latex": "...",
+        "objetivo": "max" ou "min",
+        "parametros": {
+            "learning_rate": 0.1,
+            "max_iter": 1000,
+            "x_inicial": [0, 0],
+            "tolerancia": 1e-6
+        }
+    }
     """
     dados = request.json
     validacao = pre_processamento(dados)
@@ -102,21 +117,40 @@ def otimizar_gradiente():
     dados_math = validacao['dados_matematicos']
     objetivo = validacao['objetivo']
 
-    # ==============================================================
-    # AQUI ENTRARÁ A LÓGICA FUTURA DO MÉTODO DO GRADIENTE
-    # Exemplo: 
-    # resultado_final = rodar_descida_ascensao_gradiente(dados_math['parsed_expression'], objetivo)
-    # ==============================================================
+    parametros = dados.get('parametros', {})
+    learning_rate = parametros.get('learning_rate', 0.1)
+    max_iter = parametros.get('max_iter', 1000)
+    x_inicial = parametros.get('x_inicial', None)
+    tolerancia = parametros.get('tolerancia', 1e-6)
 
-    # Remove os objetos SymPy para não dar erro no retorno temporário
-    dados_math.pop('sympy_expr', None)
-    dados_math.pop('sympy_vars', None)
-    
-    # Retorno temporário (Mock) para o Frontend testar
-    return jsonify({
-        "status": "sucesso",
-        "metodo": "Gradiente",
-        "objetivo": objetivo.upper(),
-        "mensagem": "Função não linear validada. (Cálculo real do algoritmo será implementado aqui)",
-        "dados_interpretados": dados_math
-    }), 200
+    try:
+        # Extrai (e remove do dicionário) os objetos SymPy puros
+        expressao_sympy = dados_math.pop('sympy_expr')
+        variaveis_sympy = dados_math.pop('sympy_vars')
+
+        # Executa o cálculo com os objetos
+        resultado_otimizacao = rodar_gradiente(
+            expressao_sympy=expressao_sympy,
+            variaveis_sympy=variaveis_sympy,
+            objetivo=objetivo,
+            x_inicial=x_inicial,
+            learning_rate=learning_rate,
+            max_iter=max_iter,
+            tolerancia=tolerancia
+        )
+
+        # Retorna o JSON.
+        return jsonify({
+            "status": "sucesso",
+            "metodo": "Gradiente",
+            "objetivo": objetivo.upper(),
+            "dados_interpretados": dados_math,
+            "resultado": resultado_otimizacao
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "erro",
+            "error": "Falha interna ao executar o algoritmo de otimização.",
+            "detalhes": str(e)
+        }), 500
