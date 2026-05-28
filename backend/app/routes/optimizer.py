@@ -21,13 +21,18 @@ def pre_processamento(dados):
         resultado_math = process_latex_function(latex_str)
 
         if resultado_math['is_linear']:
+            # Remove os objetos SymPy puros (não serializáveis em JSON) dos detalhes
+            detalhes_serializaveis = {
+                chave: valor for chave, valor in resultado_math.items()
+                if chave not in ('sympy_expr', 'sympy_vars')
+            }
             return {
                 "valido": False, 
                 "codigo": 400, 
                 "resposta": {
                     "error": "Modelo Linear detectado.",
                     "message": "Os métodos de otimização suportam exclusivamente funções não lineares.",
-                    "detalhes": resultado_math
+                    "detalhes": detalhes_serializaveis
                 }
             }
             
