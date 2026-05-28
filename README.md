@@ -105,26 +105,31 @@ Se o usuário enviar uma **função linear** (ex: `2x + 3y`), o servidor barrar�
 
 ## Frontend
 
-> **Aviso para a equipe de Frontend:** Preencham esta seção com as instruções de como instalar as dependências do React (`npm install`), como rodar o servidor de desenvolvimento (`npm run dev` ou `npm start`) e quais bibliotecas principais estão sendo utilizadas (ex: Vite, MathLive, Axios, etc.).
+A interface de usuário é construída em React, permitindo a inserção de fórmulas matemáticas via MathLive e a visualização gráfica dos resultados com Plotly.
+
+### Bibliotecas Principais
+- **React**: Biblioteca base para a UI.
+- **MathLive**: Componente para entrada de fórmulas matemáticas (LaTeX).
+- **Plotly.js / React-Plotly.js**: Renderização de gráficos 2D e 3D.
+- **Math.js**: Utilitários matemáticos para o frontend.
 
 ### Como rodar o Frontend localmente
 
 1. Navegue até a pasta do frontend:
    ```bash
    cd frontend
-   
-```
+   ```
 
 2. Instale as dependências:
    ```bash
-   [Comando de instalação aqui]
+   npm install
    ```
 
 3. Inicie a aplicação:
-   
-```bash
-   [Comando de execução aqui]
+   ```bash
+   npm start
    ```
+   *A aplicação abrirá automaticamente em `http://localhost:3000`.*
 
 ---
 *Projeto desenvolvido para fins acadêmicos - UNIMONTES.*
