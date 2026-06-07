@@ -2,30 +2,27 @@ import axios from 'axios';
 
 // Configuração base do Axios
 const api = axios.create({
-    baseURL: 'http://localhost:5000', // URL padrão do Flask em desenvolvimento
+    baseURL: 'http://localhost:5000',
     headers: {
         'Content-Type': 'application/json'
     }
 });
 
 /**
- * Envia uma fórmula para o backend realizar a otimização via Gradiente.
- * @param {Object} payload { formula, learningRate }
+ * Envia uma fórmula e restrições para o backend realizar a otimização.
+ * @param {Object} payload { method, formula, objective, constraints, params }
  */
-export const requestOptimization = async (payload) => {
-    const { formula, learningRate } = payload;
-
+export const requestOptimization = async ({ method, formula, objective, constraints, params }) => {
+    const endpoint = method === 'gradiente' ? '/api/optimizer/gradiente' : '/api/optimizer/direcoes-aleatorias';
+    
     try {
-        const response = await api.post('/api/optimizer/gradiente', {
+        const response = await api.post(endpoint, {
             funcao_latex: formula,
-            objetivo: 'min', // Por padrão buscando o mínimo
-            parametros: {
-                step_size: learningRate,
-                max_iter: 100
-            }
+            restricoes_latex: constraints || [],
+            objetivo: objective,
+            parametros: params
         });
 
-        // O backend já retorna no formato esperado pelo componente Graph (path, iterations, grid)
         return {
             success: true,
             data: response.data.data
@@ -33,11 +30,9 @@ export const requestOptimization = async (payload) => {
 
     } catch (error) {
         console.error('Erro na requisição API:', error);
-        
-        // Trata erro de validação (ex: modelo linear) ou erro de servidor
         const errorMessage = error.response?.data?.error || 
                              error.response?.data?.message || 
-                             'Erro de conexão com o servidor. Verifique se o backend está rodando.';
+                             'Erro de conexão com o servidor.';
         
         return {
             success: false,
