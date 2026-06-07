@@ -9,6 +9,7 @@ def pre_processamento(dados):
     antes de rodar qualquer algoritmo de otimização.
     """
     latex_str = dados.get('funcao_latex')
+    restricoes_latex = dados.get('restricoes_latex', []) # Nova lista de restrições g(x) <= 0
     objetivo = dados.get('objetivo') # Tem que ser 'max' ou 'min'
 
     if not latex_str:
@@ -18,13 +19,13 @@ def pre_processamento(dados):
         return {"valido": False, "codigo": 400, "resposta": {"error": "O campo 'objetivo' deve ser 'max' ou 'min'."}}
 
     try:
-        resultado_math = process_latex_function(latex_str)
+        resultado_math = process_latex_function(latex_str, restricoes_latex)
 
         if resultado_math['is_linear']:
             # Remove os objetos SymPy puros (não serializáveis em JSON) dos detalhes
             detalhes_serializaveis = {
                 chave: valor for chave, valor in resultado_math.items()
-                if chave not in ('sympy_expr', 'sympy_vars')
+                if chave not in ('sympy_expr', 'sympy_vars', 'sympy_constraints')
             }
             return {
                 "valido": False, 
@@ -64,12 +65,14 @@ def otimizar_direcoes_aleatorias():
         # Extrai os objetos SymPy
         expressao_sympy = dados_math['sympy_expr']
         variaveis_sympy = dados_math['sympy_vars']
+        restricoes_sympy = dados_math['sympy_constraints']
 
         # Executa o cálculo
         resultado_otimizacao = rodar_direcoes_aleatorias(
             expressao_sympy=expressao_sympy,
             variaveis_sympy=variaveis_sympy,
             objetivo=objetivo,
+            restricoes_sympy=restricoes_sympy,
             x_inicial=x_inicial,
             step_size=step_size,
             max_iter=max_iter
@@ -110,19 +113,23 @@ def otimizar_gradiente():
     objetivo = validacao['objetivo']
 
     parametros = dados.get('parametros', {})
-    step_size = parametros.get('step_size', 0.1)
+    learning_rate = parametros.get('learning_rate', 0.1)
     max_iter = parametros.get('max_iter', 100)
+    x_inicial = parametros.get('x_inicial', None)
 
     try:
         expressao_sympy = dados_math['sympy_expr']
         variaveis_sympy = dados_math['sympy_vars']
+        restricoes_sympy = dados_math['sympy_constraints']
 
         # Executa o Gradiente
         resultado = rodar_gradiente(
             expressao_sympy=expressao_sympy,
             variaveis_sympy=variaveis_sympy,
             objetivo=objetivo,
-            step_size=step_size,
+            restricoes_sympy=restricoes_sympy,
+            x_inicial=x_inicial,
+            step_size=learning_rate,
             max_iter=max_iter
         )
 

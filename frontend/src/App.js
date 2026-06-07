@@ -10,13 +10,21 @@ const App = () => {
   const [grid, setGrid] = useState({ x: [], y: [], z: [] });
   const [iterations, setIterations] = useState(0);
   const [learningRate, setLearningRate] = useState(0.1);
+  const [stepSize, setStepSize] = useState(0.1);
+  const [maxIter, setMaxIter] = useState(100);
+  const [x0, setX0] = useState('3, 3');
+  
   const [formula, setFormula] = useState('x^2 + 2*y^2');
+  const [constraint, setConstraint] = useState('');
+  const [method, setMethod] = useState('gradiente');
+  const [objective, setObjective] = useState('min');
 
   // Estados da Interface
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
   const mathFieldRef = useRef(null);
+  const constraintFieldRef = useRef(null);
 
   // Escuta as mudanças no campo de fórmula
   useEffect(() => {
@@ -28,26 +36,65 @@ const App = () => {
     }
   }, []);
 
-  // Função que se comunica com o "Backend"
+  // Escuta as mudanças no campo de restrição
+  useEffect(() => {
+    const cf = constraintFieldRef.current;
+    if (cf) {
+      const handleInput = () => setConstraint(cf.getValue('ascii-math'));
+      cf.addEventListener('input', handleInput);
+      return () => cf.removeEventListener('input', handleInput);
+    }
+  }, []);
+
+  // Função que se comunica com o Backend
   const triggerScan = useCallback(async () => {
     setIsLoading(true);
     setErrorMsg('');
 
-    // Chama o serviço (que hoje é o Mock, amanhã será o Flask)
-    const response = await requestOptimization({ formula, learningRate });
+    const startPoint = x0.split(',').map(v => parseFloat(v.trim()));
+    if (startPoint.some(isNaN)) {
+        setErrorMsg('Ponto inicial inválido. Use o formato: x, y');
+        setIsLoading(false);
+        return;
+    }
+
+    const payload = {
+        method,
+        formula,
+        objective,
+        constraints: constraint ? [constraint] : [],
+        params: method === 'gradiente' ? {
+            learning_rate: learningRate,
+            max_iter: maxIter,
+            x_inicial: startPoint
+        } : {
+            step_size: stepSize,
+            max_iter: maxIter,
+            x_inicial: startPoint
+        }
+    };
+
+    const response = await requestOptimization(payload);
 
     if (response.success) {
-      setPath(response.data.path);
-      setGrid(response.data.grid);
-      setIterations(response.data.iterations);
+      const data = response.data;
+      if (method === 'gradiente') {
+        setPath(data.path);
+        setIterations(data.iterations);
+      } else {
+        // Para Direções Aleatórias, geramos um mock de path simples
+        const pt = data.result.ponto_otimo;
+        setPath({ x: [startPoint[0], pt.x], y: [startPoint[1], pt.y], z: [0, data.result.valor_otimo] });
+        setIterations(data.result.iteracoes_realizadas);
+      }
+      setGrid(data.grid);
     } else {
       setErrorMsg(response.error);
     }
 
     setIsLoading(false);
-  }, [formula, learningRate]);
+  }, [formula, constraint, method, objective, learningRate, stepSize, maxIter, x0]);
 
-  // Executa uma varredura automática ao montar ou ao mudar a taxa
   useEffect(() => {
     triggerScan();
   }, [triggerScan]);
@@ -71,93 +118,103 @@ const App = () => {
   return (
     <div style={{ padding: '30px', fontFamily: '"Courier New", Courier, monospace', backgroundColor: batColors.bgFull, color: batColors.text, minHeight: '100vh' }}>
       <h1 style={{ textTransform: 'uppercase', letterSpacing: '2px', borderBottom: `2px solid ${batColors.yellow}`, paddingBottom: '10px', display: 'inline-block' }}>
-        Batcomputador: Análise de Gradiente Dinâmico
+        Batcomputador: Sistema de Otimização Restrita
       </h1>
 
       <div style={{ marginBottom: '30px', marginTop: '20px', padding: '20px', background: batColors.bgPanel, border: `1px solid ${batColors.border}`, borderRadius: '4px', boxShadow: `0 0 15px rgba(0,0,0,0.8)` }}>
 
-        <div style={{ marginBottom: '20px' }}>
-          <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '10px', color: batColors.yellow }}>
-            Função Objetivo Alvo f(x,y):
-          </label>
-          <math-field
-            ref={mathFieldRef}
-            style={{
-              fontSize: '24px', padding: '10px', backgroundColor: '#000',
-              color: batColors.yellow, border: `1px solid ${batColors.yellow}`,
-              borderRadius: '4px', outline: 'none', width: '100%', maxWidth: '400px'
-            }}
-          >
-            x^2 + 2y^2
-          </math-field>
-          {errorMsg && <p style={{ color: batColors.error, marginTop: '10px', fontWeight: 'bold' }}>[ERRO]: {errorMsg}</p>}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px', marginBottom: '20px' }}>
+          <div>
+            <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '10px', color: batColors.yellow }}>
+              Função Objetivo f(x,y):
+            </label>
+            <math-field ref={mathFieldRef} style={mathFieldStyle}>{formula}</math-field>
+          </div>
+          <div>
+            <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '10px', color: batColors.yellow }}>
+              Zona de Restrição g(x,y) ≤ 0:
+            </label>
+            <math-field ref={constraintFieldRef} style={mathFieldStyle}>{constraint}</math-field>
+            <small style={{ color: '#888' }}>Deixe vazio para sem restrição</small>
+          </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '20px' }}>
-          <button
-            onClick={triggerScan}
-            disabled={isLoading}
-            style={{
-              padding: '12px 24px', cursor: isLoading ? 'wait' : 'pointer',
-              background: batColors.yellow, color: '#000', fontWeight: 'bold',
-              border: 'none', borderRadius: '2px', textTransform: 'uppercase',
-              opacity: isLoading ? 0.6 : 1
-            }}
-          >
-            {isLoading ? 'PROCESSANDO...' : 'Nova Varredura Aleatória'}
-          </button>
-
-          <label style={{ display: 'inline-flex', alignItems: 'center', fontWeight: 'bold' }}>
-            Valor de Alpha (Taxa de Aprendizado):
-            <input
-              type="number" step="0.01" value={learningRate}
-              onChange={(e) => {
-                const val = parseFloat(e.target.value);
-                if (!isNaN(val)) setLearningRate(val);
-              }}
-              disabled={isLoading}
-              style={{
-                marginLeft: '15px', padding: '8px', background: '#000',
-                color: batColors.yellow, border: `1px solid ${batColors.yellow}`,
-                outline: 'none', fontFamily: 'inherit'
-              }}
-            />
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', alignItems: 'flex-end', marginBottom: '20px' }}>
+          <label style={controlLabelStyle}>
+            Método:
+            <select value={method} onChange={(e) => setMethod(e.target.value)} style={selectStyle}>
+                <option value="gradiente">Gradiente</option>
+                <option value="direcoes-aleatorias">Direções Aleatórias</option>
+            </select>
           </label>
+
+          <label style={controlLabelStyle}>
+            Objetivo:
+            <select value={objective} onChange={(e) => setObjective(e.target.value)} style={selectStyle}>
+                <option value="min">Minimizar</option>
+                <option value="max">Maximizar</option>
+            </select>
+          </label>
+
+          {method === 'gradiente' ? (
+            <label style={controlLabelStyle}>
+                Alpha:
+                <input type="number" step="0.01" value={learningRate} onChange={(e) => setLearningRate(e.target.value)} style={inputStyle} />
+            </label>
+          ) : (
+            <label style={controlLabelStyle}>
+                Step Size:
+                <input type="number" step="0.01" value={stepSize} onChange={(e) => setStepSize(e.target.value)} style={inputStyle} />
+            </label>
+          )}
+
+          <label style={controlLabelStyle}>
+            Máx Iterações:
+            <input type="number" value={maxIter} onChange={(e) => setMaxIter(e.target.value)} style={inputStyle} />
+          </label>
+
+          <label style={controlLabelStyle}>
+            Ponto Inicial (x, y):
+            <input type="text" value={x0} onChange={(e) => setX0(e.target.value)} style={inputStyle} />
+          </label>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+          <button onClick={triggerScan} disabled={isLoading} style={btnStyle}>
+            {isLoading ? 'PROCESSANDO...' : 'INICIAR VARREDURA'}
+          </button>
+          {errorMsg && <p style={{ color: batColors.error, fontWeight: 'bold', margin: 0 }}>[ERRO]: {errorMsg}</p>}
         </div>
 
         <p style={{ marginTop: '20px', opacity: 0.8 }}>
-          <strong>Status da Calibração:</strong> {isLoading ? 'Aguardando dados do servidor...' : `Mínimo localizado em ${iterations} iterações.`}
+          <strong>Telemetria:</strong> {isLoading ? 'Calculando trajetória...' : `Convergência em ${iterations} iterações.`}
+          {!isLoading && path.x.length > 0 && (
+            <span style={{ marginLeft: '20px', color: batColors.yellow }}>
+              Ótimo em: <strong>({path.x[path.x.length - 1].toFixed(4)}, {path.y[path.y.length - 1].toFixed(4)})</strong> 
+              | Valor: <strong>{path.z[path.z.length - 1].toFixed(6)}</strong>
+            </span>
+          )}
         </p>
       </div>
 
-      {/* Renderiza os gráficos apenas se tiver dados do Grid e não houver erros fatais */}
-      {!errorMsg && grid.z.length > 0 && (
+      {!errorMsg && grid.z && grid.z.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '30px', opacity: isLoading ? 0.5 : 1, transition: 'opacity 0.3s' }}>
           <Plot
             data={[
               { z: grid.z, x: grid.x, y: grid.y, type: 'surface', opacity: 0.9, colorscale: batColorScale, showscale: false },
               { x: path.x, y: path.y, z: path.z, type: 'scatter3d', mode: 'lines+markers', marker: { color: batColors.yellow, size: 4 }, line: { color: batColors.yellow, width: 4 }, name: 'Trajetória' },
+              { x: [path.x[path.x.length - 1]], y: [path.y[path.y.length - 1]], z: [path.z[path.z.length - 1]], type: 'scatter3d', mode: 'markers', marker: { color: '#FF0000', size: 8, symbol: 'diamond' }, name: 'Ponto Ótimo' }
             ]}
-            layout={{
-              ...darkLayoutBase, width: 600, height: 500, title: '1. Mapeamento Topográfico (3D)',
-              scene: {
-                xaxis: { gridcolor: batColors.grid, zerolinecolor: batColors.text, showbackground: false },
-                yaxis: { gridcolor: batColors.grid, zerolinecolor: batColors.text, showbackground: false },
-                zaxis: { gridcolor: batColors.grid, zerolinecolor: batColors.text, showbackground: false }
-              }
-            }}
+            layout={{ ...darkLayoutBase, width: 600, height: 500, title: 'Visualização Topográfica 3D' }}
           />
 
           <Plot
             data={[
-              { z: grid.z, x: grid.x, y: grid.y, type: 'contour', colorscale: batColorScale, contours: { coloring: 'lines' }, line: { width: 1, color: '#444' }, showscale: false },
-              { x: path.x, y: path.y, type: 'scatter', mode: 'lines+markers', marker: { color: batColors.yellow, size: 6, symbol: 'cross' }, line: { color: batColors.yellow, width: 2 }, name: 'Deslocamento' },
+              { z: grid.z, x: grid.x, y: grid.y, type: 'contour', colorscale: batColorScale, contours: { coloring: 'lines' }, showscale: false },
+              { x: path.x, y: path.y, type: 'scatter', mode: 'lines+markers', marker: { color: batColors.yellow, size: 6 }, line: { color: batColors.yellow, width: 2 }, name: 'Deslocamento' },
+              { x: [path.x[path.x.length - 1]], y: [path.y[path.y.length - 1]], type: 'scatter', mode: 'markers', marker: { color: '#FF0000', size: 12, symbol: 'x' }, name: 'Ponto Ótimo' }
             ]}
-            layout={{
-              ...darkLayoutBase, width: 600, height: 500, title: '2. Varredura de Setor (2D)',
-              xaxis: { gridcolor: batColors.grid, zerolinecolor: batColors.grid },
-              yaxis: { gridcolor: batColors.grid, zerolinecolor: batColors.grid }
-            }}
+            layout={{ ...darkLayoutBase, width: 600, height: 500, title: 'Mapa de Isolinhas 2D' }}
           />
 
           <Plot
@@ -165,7 +222,7 @@ const App = () => {
               { x: iterArray, y: path.z, type: 'scatter', mode: 'lines+markers', marker: { color: batColors.yellow, size: 5 }, line: { color: batColors.yellow, width: 2 } },
             ]}
             layout={{
-              ...darkLayoutBase, width: 600, height: 400, title: '3. Telemetria de Convergência',
+              ...darkLayoutBase, width: 1230, height: 400, title: 'Telemetria de Convergência (f(x,y) por Iteração)',
               xaxis: { title: 'Iterações', gridcolor: batColors.grid, zerolinecolor: batColors.grid },
               yaxis: { title: 'Valor do Alvo', gridcolor: batColors.grid, zerolinecolor: batColors.grid }
             }}
@@ -174,6 +231,32 @@ const App = () => {
       )}
     </div>
   );
+};
+
+const mathFieldStyle = {
+    fontSize: '20px', padding: '10px', backgroundColor: '#000',
+    color: '#FCE205', border: '1px solid #FCE205',
+    borderRadius: '4px', outline: 'none', width: '100%'
+};
+
+const controlLabelStyle = { display: 'inline-flex', flexDirection: 'column', fontWeight: 'bold', fontSize: '14px' };
+
+const selectStyle = {
+    marginTop: '5px', padding: '8px', background: '#000',
+    color: '#FCE205', border: '1px solid #333', outline: 'none',
+    fontFamily: 'inherit'
+};
+
+const inputStyle = {
+    marginTop: '5px', padding: '8px', background: '#000',
+    color: '#FCE205', border: '1px solid #333', outline: 'none',
+    width: '100px', fontFamily: 'inherit'
+};
+
+const btnStyle = {
+    padding: '12px 30px', cursor: 'pointer',
+    background: '#FCE205', color: '#000', fontWeight: 'bold',
+    border: 'none', borderRadius: '2px', textTransform: 'uppercase'
 };
 
 export default App;
