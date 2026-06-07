@@ -30,21 +30,23 @@ const App = () => {
   useEffect(() => {
     const mf = mathFieldRef.current;
     if (mf) {
+      mf.setValue(formula, { silenceInternalErrors: true });
       const handleInput = () => setFormula(mf.getValue('ascii-math'));
       mf.addEventListener('input', handleInput);
       return () => mf.removeEventListener('input', handleInput);
     }
-  }, []);
+  }, []); // Só inicializa uma vez
 
   // Escuta as mudanças no campo de restrição
   useEffect(() => {
     const cf = constraintFieldRef.current;
     if (cf) {
+      cf.setValue(constraint, { silenceInternalErrors: true });
       const handleInput = () => setConstraint(cf.getValue('ascii-math'));
       cf.addEventListener('input', handleInput);
       return () => cf.removeEventListener('input', handleInput);
     }
-  }, []);
+  }, []); // Só inicializa uma vez
 
   // Função que se comunica com o Backend
   const triggerScan = useCallback(async () => {
@@ -128,13 +130,13 @@ const App = () => {
             <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '10px', color: batColors.yellow }}>
               Função Objetivo f(x,y):
             </label>
-            <math-field ref={mathFieldRef} style={mathFieldStyle}>{formula}</math-field>
+            <math-field ref={mathFieldRef} style={mathFieldStyle}></math-field>
           </div>
           <div>
             <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '10px', color: batColors.yellow }}>
               Zona de Restrição g(x,y) ≤ 0:
             </label>
-            <math-field ref={constraintFieldRef} style={mathFieldStyle}>{constraint}</math-field>
+            <math-field ref={constraintFieldRef} style={mathFieldStyle}></math-field>
             <small style={{ color: '#888' }}>Deixe vazio para sem restrição</small>
           </div>
         </div>
