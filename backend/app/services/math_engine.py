@@ -134,7 +134,7 @@ def avaliar_restricoes(ponto_vals, variaveis_sympy, restricoes_sympy):
             return False
     return True
 
-def rodar_gradiente(expressao_sympy, variaveis_sympy, objetivo, restricoes_sympy=None, x_inicial=None, step_size=0.1, max_iter=100, tolerance=0.01):
+def rodar_gradiente(expressao_sympy, variaveis_sympy, objetivo, restricoes_sympy=None, x_inicial=None, step_size=0.1, max_iter=100, tolerance=0.0001):
     """
     Executa a Descida/Ascensão do Gradiente com Momentum para convergência acelerada.
     """
@@ -191,9 +191,9 @@ def rodar_gradiente(expressao_sympy, variaveis_sympy, objetivo, restricoes_sympy
         "valor_otimo": hist_z[-1]
     }
     
-def rodar_direcoes_aleatorias(expressao_sympy, variaveis_sympy, objetivo, restricoes_sympy=None, x_inicial=None, step_size=0.1, max_iter=1000, tolerance=0.001):
+def rodar_direcoes_aleatorias(expressao_sympy, variaveis_sympy, objetivo, restricoes_sympy=None, x_inicial=None, step_size=0.1, max_iter=1000, tolerance=0.0001):
     """
-    Otimização por Direções Aleatórias com suporte a restrições e parada antecipada.
+    Otimização por Direções Aleatórias com Step Size adaptativo e parada antecipada.
     """
     restricoes_sympy = restricoes_sympy or []
     n_vars = len(variaveis_sympy)
@@ -206,21 +206,23 @@ def rodar_direcoes_aleatorias(expressao_sympy, variaveis_sympy, objetivo, restri
     f_atual = f_inicial
     is_max = (objetivo.lower() == 'max')
 
-    # Parada antecipada (Early Stopping)
-    paciencia = 50 
+    # Parada antecipada e Step Size Dinâmico
+    paciencia = 80 
     tentativas_sem_melhora = 0
     passos_com_sucesso = 0
+    curr_step = float(step_size)
 
     for i in range(int(max_iter)):
         direcao = [random.gauss(0.0, 1.0) for _ in range(n_vars)]
         norma = math.sqrt(sum(d**2 for d in direcao))
         if norma == 0: continue
             
-        x_novo = [x_atual[i] + step_size * (direcao[i]/norma) for i in range(n_vars)]
+        x_novo = [x_atual[i] + curr_step * (direcao[i]/norma) for i in range(n_vars)]
         
         try:
             if restricoes_sympy and not avaliar_restricoes(x_novo, variaveis_sympy, restricoes_sympy):
                 tentativas_sem_melhora += 1
+                curr_step *= 0.95 # Encolhe o passo se bater na borda
                 if tentativas_sem_melhora > paciencia: break
                 continue
             
@@ -230,9 +232,11 @@ def rodar_direcoes_aleatorias(expressao_sympy, variaveis_sympy, objetivo, restri
             if melhorou:
                 x_atual, f_atual = x_novo, f_novo
                 tentativas_sem_melhora = 0 
-                passos_com_sucesso += 1 # Conta apenas o sucesso
+                passos_com_sucesso += 1
+                curr_step *= 1.1 # Aumenta o passo se estiver acertando
             else:
                 tentativas_sem_melhora += 1
+                curr_step *= 0.95 # Diminui o passo para busca local fina
         
             if tentativas_sem_melhora > paciencia:
                 break

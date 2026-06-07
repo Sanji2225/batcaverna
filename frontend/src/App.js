@@ -9,8 +9,8 @@ const App = () => {
   const [path, setPath] = useState({ x: [], y: [], z: [] });
   const [grid, setGrid] = useState({ x: [], y: [], z: [] });
   const [iterations, setIterations] = useState(0);
-  const [learningRate, setLearningRate] = useState(0.2);
-  const [stepSize, setStepSize] = useState(0.2);
+  const [learningRate, setLearningRate] = useState(0.5);
+  const [stepSize, setStepSize] = useState(0.5);
   const [maxIter, setMaxIter] = useState(200);
   const [x0, setX0] = useState('3, 3');
 
@@ -83,11 +83,8 @@ const App = () => {
       formula,
       objective,
       constraints: constraint ? [constraint] : [],
-      params: method === 'gradiente' ? {
+      params: {
         learning_rate: learningRate,
-        max_iter: maxIter,
-        x_inicial: startPoint
-      } : {
         step_size: stepSize,
         max_iter: maxIter,
         x_inicial: startPoint
@@ -180,17 +177,13 @@ const App = () => {
             </select>
           </label>
 
-          {method === 'gradiente' ? (
-            <label style={controlLabelStyle}>
-              Alpha:
-              <input type="number" step="0.01" value={learningRate} onChange={(e) => setLearningRate(e.target.value)} style={inputStyle} />
-            </label>
-          ) : (
-            <label style={controlLabelStyle}>
-              Step Size:
-              <input type="number" step="0.01" value={stepSize} onChange={(e) => setStepSize(e.target.value)} style={inputStyle} />
-            </label>
-          )}
+          <label style={controlLabelStyle}>
+            Alpha:
+            <input type="number" step="0.01" value={learningRate} onChange={(e) => {
+              setLearningRate(e.target.value);
+              setStepSize(e.target.value);
+            }} style={inputStyle} />
+          </label>
 
           <label style={controlLabelStyle}>
             Máx Iterações:
