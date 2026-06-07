@@ -57,8 +57,8 @@ def otimizar_direcoes_aleatorias():
     objetivo = validacao['objetivo']
 
     parametros = dados.get('parametros', {})
-    step_size = parametros.get('step_size', 0.1)
-    max_iter = parametros.get('max_iter', 1000)
+    step_size = float(parametros.get('step_size', 0.1))
+    max_iter = int(parametros.get('max_iter', 1000))
     x_inicial = parametros.get('x_inicial', None)
 
     try:
@@ -113,8 +113,8 @@ def otimizar_gradiente():
     objetivo = validacao['objetivo']
 
     parametros = dados.get('parametros', {})
-    learning_rate = parametros.get('learning_rate', 0.1)
-    max_iter = parametros.get('max_iter', 100)
+    learning_rate = float(parametros.get('learning_rate', 0.1))
+    max_iter = int(parametros.get('max_iter', 100))
     x_inicial = parametros.get('x_inicial', None)
 
     try:

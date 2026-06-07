@@ -9,12 +9,12 @@ const App = () => {
   const [path, setPath] = useState({ x: [], y: [], z: [] });
   const [grid, setGrid] = useState({ x: [], y: [], z: [] });
   const [iterations, setIterations] = useState(0);
-  const [learningRate, setLearningRate] = useState(0.1);
-  const [stepSize, setStepSize] = useState(0.1);
-  const [maxIter, setMaxIter] = useState(100);
+  const [learningRate, setLearningRate] = useState(0.2);
+  const [stepSize, setStepSize] = useState(0.2);
+  const [maxIter, setMaxIter] = useState(200);
   const [x0, setX0] = useState('3, 3');
-  
-  const [formula, setFormula] = useState('x^2 + 2*y^2');
+
+  const [formula, setFormula] = useState('x^2 + 2y^2');
   const [constraint, setConstraint] = useState('');
   const [method, setMethod] = useState('gradiente');
   const [objective, setObjective] = useState('min');
@@ -31,22 +31,40 @@ const App = () => {
     const mf = mathFieldRef.current;
     if (mf) {
       mf.setValue(formula, { silenceInternalErrors: true });
-      const handleInput = () => setFormula(mf.getValue('ascii-math'));
+      let timeoutId;
+      const handleInput = () => {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
+          setFormula(mf.getValue('latex'));
+        }, 800); // 800ms de debounce
+      };
       mf.addEventListener('input', handleInput);
-      return () => mf.removeEventListener('input', handleInput);
+      return () => {
+        mf.removeEventListener('input', handleInput);
+        clearTimeout(timeoutId);
+      };
     }
-  }, []); // Só inicializa uma vez
+  }, []);
 
   // Escuta as mudanças no campo de restrição
   useEffect(() => {
     const cf = constraintFieldRef.current;
     if (cf) {
       cf.setValue(constraint, { silenceInternalErrors: true });
-      const handleInput = () => setConstraint(cf.getValue('ascii-math'));
+      let timeoutId;
+      const handleInput = () => {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
+          setConstraint(cf.getValue('latex'));
+        }, 800);
+      };
       cf.addEventListener('input', handleInput);
-      return () => cf.removeEventListener('input', handleInput);
+      return () => {
+        cf.removeEventListener('input', handleInput);
+        clearTimeout(timeoutId);
+      };
     }
-  }, []); // Só inicializa uma vez
+  }, []);
 
   // Função que se comunica com o Backend
   const triggerScan = useCallback(async () => {
@@ -55,25 +73,25 @@ const App = () => {
 
     const startPoint = x0.split(',').map(v => parseFloat(v.trim()));
     if (startPoint.some(isNaN)) {
-        setErrorMsg('Ponto inicial inválido. Use o formato: x, y');
-        setIsLoading(false);
-        return;
+      setErrorMsg('Ponto inicial inválido. Use o formato: x, y');
+      setIsLoading(false);
+      return;
     }
 
     const payload = {
-        method,
-        formula,
-        objective,
-        constraints: constraint ? [constraint] : [],
-        params: method === 'gradiente' ? {
-            learning_rate: learningRate,
-            max_iter: maxIter,
-            x_inicial: startPoint
-        } : {
-            step_size: stepSize,
-            max_iter: maxIter,
-            x_inicial: startPoint
-        }
+      method,
+      formula,
+      objective,
+      constraints: constraint ? [constraint] : [],
+      params: method === 'gradiente' ? {
+        learning_rate: learningRate,
+        max_iter: maxIter,
+        x_inicial: startPoint
+      } : {
+        step_size: stepSize,
+        max_iter: maxIter,
+        x_inicial: startPoint
+      }
     };
 
     const response = await requestOptimization(payload);
@@ -84,9 +102,13 @@ const App = () => {
         setPath(data.path);
         setIterations(data.iterations);
       } else {
-        // Para Direções Aleatórias, geramos um mock de path simples
+        // Para Direções Aleatórias, usamos o valor real de z inicial retornado pelo backend
         const pt = data.result.ponto_otimo;
-        setPath({ x: [startPoint[0], pt.x], y: [startPoint[1], pt.y], z: [0, data.result.valor_otimo] });
+        setPath({
+          x: [startPoint[0], pt.x],
+          y: [startPoint[1], pt.y],
+          z: [data.result.valor_inicial, data.result.valor_otimo]
+        });
         setIterations(data.result.iteracoes_realizadas);
       }
       setGrid(data.grid);
@@ -145,28 +167,28 @@ const App = () => {
           <label style={controlLabelStyle}>
             Método:
             <select value={method} onChange={(e) => setMethod(e.target.value)} style={selectStyle}>
-                <option value="gradiente">Gradiente</option>
-                <option value="direcoes-aleatorias">Direções Aleatórias</option>
+              <option value="gradiente">Gradiente</option>
+              <option value="direcoes-aleatorias">Direções Aleatórias</option>
             </select>
           </label>
 
           <label style={controlLabelStyle}>
             Objetivo:
             <select value={objective} onChange={(e) => setObjective(e.target.value)} style={selectStyle}>
-                <option value="min">Minimizar</option>
-                <option value="max">Maximizar</option>
+              <option value="min">Minimizar</option>
+              <option value="max">Maximizar</option>
             </select>
           </label>
 
           {method === 'gradiente' ? (
             <label style={controlLabelStyle}>
-                Alpha:
-                <input type="number" step="0.01" value={learningRate} onChange={(e) => setLearningRate(e.target.value)} style={inputStyle} />
+              Alpha:
+              <input type="number" step="0.01" value={learningRate} onChange={(e) => setLearningRate(e.target.value)} style={inputStyle} />
             </label>
           ) : (
             <label style={controlLabelStyle}>
-                Step Size:
-                <input type="number" step="0.01" value={stepSize} onChange={(e) => setStepSize(e.target.value)} style={inputStyle} />
+              Step Size:
+              <input type="number" step="0.01" value={stepSize} onChange={(e) => setStepSize(e.target.value)} style={inputStyle} />
             </label>
           )}
 
@@ -192,7 +214,7 @@ const App = () => {
           <strong>Telemetria:</strong> {isLoading ? 'Calculando trajetória...' : `Convergência em ${iterations} iterações.`}
           {!isLoading && path.x.length > 0 && (
             <span style={{ marginLeft: '20px', color: batColors.yellow }}>
-              Ótimo em: <strong>({path.x[path.x.length - 1].toFixed(4)}, {path.y[path.y.length - 1].toFixed(4)})</strong> 
+              Ótimo em: <strong>({path.x[path.x.length - 1].toFixed(4)}, {path.y[path.y.length - 1].toFixed(4)})</strong>
               | Valor: <strong>{path.z[path.z.length - 1].toFixed(6)}</strong>
             </span>
           )}
@@ -236,29 +258,29 @@ const App = () => {
 };
 
 const mathFieldStyle = {
-    fontSize: '20px', padding: '10px', backgroundColor: '#000',
-    color: '#FCE205', border: '1px solid #FCE205',
-    borderRadius: '4px', outline: 'none', width: '100%'
+  fontSize: '20px', padding: '10px', backgroundColor: '#000',
+  color: '#FCE205', border: '1px solid #FCE205',
+  borderRadius: '4px', outline: 'none', width: '100%'
 };
 
 const controlLabelStyle = { display: 'inline-flex', flexDirection: 'column', fontWeight: 'bold', fontSize: '14px' };
 
 const selectStyle = {
-    marginTop: '5px', padding: '8px', background: '#000',
-    color: '#FCE205', border: '1px solid #333', outline: 'none',
-    fontFamily: 'inherit'
+  marginTop: '5px', padding: '8px', background: '#000',
+  color: '#FCE205', border: '1px solid #333', outline: 'none',
+  fontFamily: 'inherit'
 };
 
 const inputStyle = {
-    marginTop: '5px', padding: '8px', background: '#000',
-    color: '#FCE205', border: '1px solid #333', outline: 'none',
-    width: '100px', fontFamily: 'inherit'
+  marginTop: '5px', padding: '8px', background: '#000',
+  color: '#FCE205', border: '1px solid #333', outline: 'none',
+  width: '100px', fontFamily: 'inherit'
 };
 
 const btnStyle = {
-    padding: '12px 30px', cursor: 'pointer',
-    background: '#FCE205', color: '#000', fontWeight: 'bold',
-    border: 'none', borderRadius: '2px', textTransform: 'uppercase'
+  padding: '12px 30px', cursor: 'pointer',
+  background: '#FCE205', color: '#000', fontWeight: 'bold',
+  border: 'none', borderRadius: '2px', textTransform: 'uppercase'
 };
 
 export default App;

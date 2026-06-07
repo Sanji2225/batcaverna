@@ -4,22 +4,64 @@ import sympy as sp
 from sympy.parsing.latex import parse_latex
 from sympy.parsing.latex.errors import LaTeXParsingError
 
+def sanitize_and_parse(s):
+    """
+    Tenta converter uma string (LaTeX, ASCII ou Math) para SymPy de forma agressiva.
+    """
+    if not s or not isinstance(s, str): return None
+    
+    # Remove "f(x,y) =" ou similares
+    if '=' in s:
+        s = s.split('=')[-1].strip()
+
+    # 1. Tenta sympify direto (notação de programação)
+    try:
+        return sp.sympify(s)
+    except Exception:
+        pass
+
+    # 2. Tenta parse_latex padrão
+    try:
+        return parse_latex(s).doit()
+    except Exception:
+        pass
+
+    # 3. Limpeza agressiva para fallback
+    # Substitui padrões LaTeX por notação matemática padrão
+    s_clean = s.replace('**', '^')
+    s_clean = s_clean.replace('\\cdot', '*').replace('\\times', '*')
+    s_clean = s_clean.replace('\\left(', '(').replace('\\right)', ')')
+    s_clean = s_clean.replace('\\left[', '[').replace('\\right]', ']')
+    s_clean = s_clean.replace('{', '(').replace('}', ')')
+    s_clean = s_clean.replace('\\', '') # Remove barras restantes
+
+    try:
+        return sp.sympify(s_clean)
+    except Exception:
+        pass
+
+    # 4. Tenta parse_latex com a string limpa (caso tenha sobrado algo)
+    try:
+        return parse_latex(s_clean).doit()
+    except Exception:
+        pass
+
+    return None
+
 def process_latex_function(latex_str, constraints_latex=None):
     """
-    Motor matemático: Converte o modelo LaTeX para sympy e realiza a análise de linearidade.
-    Também processa as restrições se fornecidas.
+    Motor matemático: Converte o modelo para sympy usando o parser robusto.
     """
-    try:
-        expressao = parse_latex(latex_str).doit()
-    except LaTeXParsingError:
-        raise ValueError("O formato LaTeX da função é inválido.")
-    except Exception as e:
-        raise ValueError(f"Erro ao processar a função: {str(e)}")
+    expressao = sanitize_and_parse(latex_str)
+    
+    if expressao is None:
+        raise ValueError("O formato da função é inválido. Use LaTeX ou notação matemática padrão (ex: x^2 + 2*y).")
 
     variaveis = sorted(list(expressao.free_symbols), key=lambda x: x.name)
-    is_linear = True
+    is_linear = False # Assume não linear por padrão se for constante (ou sem vars)
     
     if variaveis:
+        is_linear = True # Se tem variáveis, testamos
         try:
             polinomio = sp.Poly(expressao, *variaveis)
             if polinomio.total_degree() > 1:
@@ -31,12 +73,9 @@ def process_latex_function(latex_str, constraints_latex=None):
     if constraints_latex:
         for c_latex in constraints_latex:
             if not c_latex.strip(): continue
-            try:
-                # Assume restrições no formato g(x,y) <= 0
-                c_expr = parse_latex(c_latex).doit()
+            c_expr = sanitize_and_parse(c_latex)
+            if c_expr is not None:
                 restricoes_sympy.append(c_expr)
-            except Exception:
-                continue
             
     return {
         "parsed_expression": str(expressao),
@@ -97,42 +136,47 @@ def avaliar_restricoes(ponto_vals, variaveis_sympy, restricoes_sympy):
 
 def rodar_gradiente(expressao_sympy, variaveis_sympy, objetivo, restricoes_sympy=None, x_inicial=None, step_size=0.1, max_iter=100, tolerance=0.01):
     """
-    Executa a Descida/Ascensão do Gradiente com suporte a restrições simples (Barreira/Penalidade).
+    Executa a Descida/Ascensão do Gradiente com Momentum para convergência acelerada.
     """
     restricoes_sympy = restricoes_sympy or []
     if len(variaveis_sympy) != 2:
-        raise ValueError("O método do gradiente nesta implementação suporta exatamente 2 variáveis (x e y).")
+        raise ValueError("O método do gradiente suporta exatamente 2 variáveis (x e y).")
 
     vars_map = {v.name: v for v in variaveis_sympy}
-    x_sym = vars_map.get('x')
-    y_sym = vars_map.get('y')
+    x_sym, y_sym = vars_map.get('x'), vars_map.get('y')
 
     f_func = sp.lambdify((x_sym, y_sym), expressao_sympy, modules=['math'])
     dx_func = sp.lambdify((x_sym, y_sym), sp.diff(expressao_sympy, x_sym), modules=['math'])
     dy_func = sp.lambdify((x_sym, y_sym), sp.diff(expressao_sympy, y_sym), modules=['math'])
 
-    if x_inicial is None:
-        curr_x, curr_y = 0.0, 0.0
-    else:
-        curr_x, curr_y = x_inicial
-
+    curr_x, curr_y = x_inicial if x_inicial else [0.0, 0.0]
+    
     hist_x, hist_y, hist_z = [curr_x], [curr_y], [float(f_func(curr_x, curr_y))]
     is_max = (objetivo.lower() == 'max')
     mult = 1 if is_max else -1
 
-    for _ in range(max_iter):
+    # Parâmetros de Momentum para acelerar convergência
+    v_x, v_y = 0.0, 0.0
+    beta = 0.7 # Fator de amortecimento
+
+    for _ in range(int(max_iter)):
         try:
             gx, gy = float(dx_func(curr_x, curr_y)), float(dy_func(curr_x, curr_y))
         except (ValueError, ZeroDivisionError): break
 
-        if math.sqrt(gx**2 + gy**2) < tolerance: break
+        norm = math.sqrt(gx**2 + gy**2)
+        if norm < tolerance: break
 
-        prox_x = curr_x + mult * step_size * gx
-        prox_y = curr_y + mult * step_size * gy
+        # Atualização com Momentum
+        v_x = beta * v_x + (1 - beta) * gx
+        v_y = beta * v_y + (1 - beta) * gy
+
+        prox_x = curr_x + mult * step_size * v_x
+        prox_y = curr_y + mult * step_size * v_y
 
         # Verifica restrição
         if restricoes_sympy and not avaliar_restricoes([prox_x, prox_y], variaveis_sympy, restricoes_sympy):
-            # Se violar, tentamos um passo menor ou paramos aqui para simplificar
+            v_x, v_y = 0.0, 0.0 # Reseta momentum se bater na restrição
             step_size *= 0.5
             if step_size < 1e-6: break
             continue
@@ -142,14 +186,14 @@ def rodar_gradiente(expressao_sympy, variaveis_sympy, objetivo, restricoes_sympy
 
     return {
         "path": {"x": hist_x, "y": hist_y, "z": hist_z},
-        "iterations": len(hist_x),
+        "iterations": len(hist_x) - 1,
         "ponto_otimo": {"x": curr_x, "y": curr_y},
         "valor_otimo": hist_z[-1]
     }
     
-def rodar_direcoes_aleatorias(expressao_sympy, variaveis_sympy, objetivo, restricoes_sympy=None, x_inicial=None, step_size=0.1, max_iter=1000):
+def rodar_direcoes_aleatorias(expressao_sympy, variaveis_sympy, objetivo, restricoes_sympy=None, x_inicial=None, step_size=0.1, max_iter=1000, tolerance=0.001):
     """
-    Otimização por Direções Aleatórias com suporte a restrições.
+    Otimização por Direções Aleatórias com suporte a restrições e parada antecipada.
     """
     restricoes_sympy = restricoes_sympy or []
     n_vars = len(variaveis_sympy)
@@ -158,10 +202,16 @@ def rodar_direcoes_aleatorias(expressao_sympy, variaveis_sympy, objetivo, restri
 
     func = sp.lambdify(variaveis_sympy, expressao_sympy, modules=['math'])
     x_atual = [float(x) for x in x_inicial] if x_inicial else [0.0] * n_vars
-    f_atual = func(*x_atual)
+    f_inicial = func(*x_atual)
+    f_atual = f_inicial
     is_max = (objetivo.lower() == 'max')
 
-    for _ in range(max_iter):
+    # Parada antecipada (Early Stopping)
+    paciencia = 50 
+    tentativas_sem_melhora = 0
+    passos_com_sucesso = 0
+
+    for i in range(int(max_iter)):
         direcao = [random.gauss(0.0, 1.0) for _ in range(n_vars)]
         norma = math.sqrt(sum(d**2 for d in direcao))
         if norma == 0: continue
@@ -169,18 +219,30 @@ def rodar_direcoes_aleatorias(expressao_sympy, variaveis_sympy, objetivo, restri
         x_novo = [x_atual[i] + step_size * (direcao[i]/norma) for i in range(n_vars)]
         
         try:
-            # Verifica restrições antes de aceitar o novo ponto
             if restricoes_sympy and not avaliar_restricoes(x_novo, variaveis_sympy, restricoes_sympy):
+                tentativas_sem_melhora += 1
+                if tentativas_sem_melhora > paciencia: break
                 continue
             
             f_novo = func(*x_novo)
-            if (f_novo > f_atual) if is_max else (f_novo < f_atual):
+            melhorou = (f_novo > f_atual + tolerance) if is_max else (f_novo < f_atual - tolerance)
+            
+            if melhorou:
                 x_atual, f_atual = x_novo, f_novo
+                tentativas_sem_melhora = 0 
+                passos_com_sucesso += 1 # Conta apenas o sucesso
+            else:
+                tentativas_sem_melhora += 1
+        
+            if tentativas_sem_melhora > paciencia:
+                break
+                
         except (ValueError, ZeroDivisionError): continue
 
     vars_str_list = [str(v) for v in variaveis_sympy]
     return {
         "ponto_otimo": {name: val for name, val in zip(vars_str_list, x_atual)},
         "valor_otimo": float(f_atual),
-        "iteracoes_realizadas": max_iter
+        "valor_inicial": float(f_inicial),
+        "iteracoes_realizadas": passos_com_sucesso
     }
