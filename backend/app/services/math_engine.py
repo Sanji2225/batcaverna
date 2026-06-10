@@ -155,31 +155,52 @@ def rodar_gradiente(expressao_sympy, variaveis_sympy, objetivo, restricoes_sympy
     is_max = (objetivo.lower() == 'max')
     mult = 1 if is_max else -1
 
-    # Parâmetros de Momentum para acelerar convergência
-    v_x, v_y = 0.0, 0.0
-    beta = 0.7 # Fator de amortecimento
-
     for _ in range(int(max_iter)):
         try:
             gx, gy = float(dx_func(curr_x, curr_y)), float(dy_func(curr_x, curr_y))
+            f_atual = float(f_func(curr_x, curr_y))
         except (ValueError, ZeroDivisionError): break
 
         norm = math.sqrt(gx**2 + gy**2)
         if norm < tolerance: break
 
-        # Atualização com Momentum
-        v_x = beta * v_x + (1 - beta) * gx
-        v_y = beta * v_y + (1 - beta) * gy
+        # Direção pura
+        p_x = mult * gx
+        p_y = mult * gy
+        
+        # Produto escalar do gradiente com a direção
+        m = gx * p_x + gy * p_y
 
-        prox_x = curr_x + mult * step_size * v_x
-        prox_y = curr_y + mult * step_size * v_y
+        # Armijo Line Search para definir o passo dinâmico
+        alpha = 1.0 # Passo inicial dinâmico
+        c = 1e-4
+        rho = 0.5
+        
+        while True:
+            prox_x = curr_x + alpha * p_x
+            prox_y = curr_y + alpha * p_y
+            
+            # Verifica restrição
+            if restricoes_sympy and not avaliar_restricoes([prox_x, prox_y], variaveis_sympy, restricoes_sympy):
+                alpha *= rho
+                if alpha < 1e-10: break
+                continue
 
-        # Verifica restrição
-        if restricoes_sympy and not avaliar_restricoes([prox_x, prox_y], variaveis_sympy, restricoes_sympy):
-            v_x, v_y = 0.0, 0.0 # Reseta momentum se bater na restrição
-            step_size *= 0.5
-            if step_size < 1e-6: break
-            continue
+            try:
+                f_prox = float(f_func(prox_x, prox_y))
+                # Condição de Armijo
+                if is_max:
+                    if f_prox >= f_atual + c * alpha * m:
+                        break
+                else:
+                    if f_prox <= f_atual + c * alpha * m:
+                        break
+            except (ValueError, ZeroDivisionError, TypeError):
+                pass
+                
+            alpha *= rho
+            if alpha < 1e-10:
+                break
 
         curr_x, curr_y = prox_x, prox_y
         hist_x.append(curr_x); hist_y.append(curr_y); hist_z.append(float(f_func(curr_x, curr_y)))
