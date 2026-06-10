@@ -116,6 +116,7 @@ def otimizar_gradiente():
     learning_rate = float(parametros.get('learning_rate', 0.1))
     max_iter = int(parametros.get('max_iter', 100))
     x_inicial = parametros.get('x_inicial', None)
+    tolerancia = float(parametros.get('tolerancia', 1e-6))
 
     try:
         expressao_sympy = dados_math['sympy_expr']
@@ -130,7 +131,8 @@ def otimizar_gradiente():
             restricoes_sympy=restricoes_sympy,
             x_inicial=x_inicial,
             step_size=learning_rate,
-            max_iter=max_iter
+            max_iter=max_iter,
+            tolerance=tolerancia
         )
 
         # Gera o Grid para o gráfico
