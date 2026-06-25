@@ -2,6 +2,7 @@ import math
 import random
 import numpy as np
 import sympy as sp
+from sympy.parsing.latex import parse_latex
 from sympy.parsing.latex.errors import LaTeXParsingError
 
 def sanitize_and_parse(s):
