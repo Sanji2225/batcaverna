@@ -237,8 +237,8 @@ const App = () => {
   } : null;
 
   const darkLayoutBase = {
-    paper_bgcolor: batColors.bgPanel, plot_bgcolor: batColors.bgPanel,
-    font: { color: batColors.text, family: '"Courier New", Courier, monospace' },
+    paper_bgcolor: '#FFFFFF', plot_bgcolor: '#FFFFFF',
+    font: { color: '#000000', family: '"Courier New", Courier, monospace' },
     margin: { t: 50, b: 50, l: 50, r: 50 }
   };
 
@@ -372,6 +372,8 @@ const App = () => {
       {!errorMsg && grid.z && grid.z.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '30px', opacity: isLoading ? 0.5 : 1, transition: 'opacity 0.3s' }}>
           <Plot
+            useResizeHandler={true}
+            style={{ flex: '1 1 45%', minWidth: '400px', height: '550px' }}
             data={[
               { z: grid.z, x: grid.x, y: grid.y, type: 'surface', opacity: 0.9, colorscale: batColorScale, showscale: false, name: 'Objetivo' },
               ...(infeasibleSurface ? [{
@@ -390,7 +392,7 @@ const App = () => {
               ...(otimo3Dvisivel ? [{ x: [px[lastIdx]], y: [py[lastIdx]], z: [pz[lastIdx]], type: 'scatter3d', mode: 'markers', marker: { color: '#FF0000', size: 8, symbol: 'diamond' }, name: 'Ponto Ótimo' }] : [])
             ]}
             layout={{
-              ...darkLayoutBase, width: 720, height: 620, title: 'Visualização Topográfica 3D', showlegend: true, legend: { x: 0, y: 1 },
+              ...darkLayoutBase, autosize: true, title: 'Visualização Topográfica 3D', showlegend: true, legend: { x: 0, y: 1 },
               margin: { t: 40, b: 0, l: 0, r: 0 },
               scene: {
                 xaxis: { range: xRange }, yaxis: { range: yRange }, zaxis: { range: zRange },
@@ -401,6 +403,8 @@ const App = () => {
           />
 
           <Plot
+            useResizeHandler={true}
+            style={{ flex: '1 1 45%', minWidth: '400px', height: '550px' }}
             data={[
               ...constraintTraces,
               {
@@ -415,17 +419,19 @@ const App = () => {
               ...(otimo2Dvisivel ? [{ x: [px[lastIdx]], y: [py[lastIdx]], type: 'scatter', mode: 'markers', marker: { color: '#FF0000', size: 12, symbol: 'x' }, name: 'Ponto Ótimo' }] : [])
             ]}
             layout={{
-              ...darkLayoutBase, width: 720, height: 620, title: 'Mapa de Isolinhas 2D', showlegend: true, legend: { x: 0, y: 1 },
+              ...darkLayoutBase, autosize: true, title: 'Mapa de Isolinhas 2D', showlegend: true, legend: { x: 0, y: 1 },
               xaxis: { range: xRange }, yaxis: { range: yRange }
             }}
           />
 
           <Plot
+            useResizeHandler={true}
+            style={{ width: '100%', height: '400px' }}
             data={[
               { x: iterArray, y: path.z, type: 'scatter', mode: 'lines+markers', marker: { color: batColors.yellow, size: 5 }, line: { color: batColors.yellow, width: 2 } },
             ]}
             layout={{
-              ...darkLayoutBase, width: 1470, height: 400, title: 'Telemetria de Convergência (f(x,y) por Iteração)',
+              ...darkLayoutBase, autosize: true, title: 'Telemetria de Convergência (f(x,y) por Iteração)',
               xaxis: { title: 'Iterações', gridcolor: batColors.grid, zerolinecolor: batColors.grid },
               yaxis: { title: 'Valor do Alvo', gridcolor: batColors.grid, zerolinecolor: batColors.grid }
             }}
