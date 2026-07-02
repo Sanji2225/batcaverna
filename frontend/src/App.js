@@ -256,6 +256,20 @@ const App = () => {
   }));
   const zRange = Number.isFinite(zMin) && Number.isFinite(zMax) ? [zMin, zMax] : undefined;
 
+  // Recorta a trajetória ao domínio visível. No 3D o Plotly NÃO recorta scatter
+  // pelo range dos eixos: se a busca diverge (max ilimitado), pontos em ~1e12
+  // forçam a cena a encolher a superfície a um ponto. Pontos fora viram null.
+  const px = path.x || [], py = path.y || [], pz = path.z || [];
+  const inRange = (v, r) => !r || (v >= r[0] && v <= r[1]);
+  const mask2D = px.map((_, i) => inRange(px[i], xRange) && inRange(py[i], yRange));
+  const mask3D = px.map((_, i) => mask2D[i] && inRange(pz[i], zRange));
+  const clip = (arr, mask) => arr.map((v, i) => (mask[i] ? v : null));
+  const path2D = { x: clip(px, mask2D), y: clip(py, mask2D) };
+  const path3D = { x: clip(px, mask3D), y: clip(py, mask3D), z: clip(pz, mask3D) };
+  const lastIdx = px.length - 1;
+  const otimo2Dvisivel = lastIdx >= 0 && mask2D[lastIdx];
+  const otimo3Dvisivel = lastIdx >= 0 && mask3D[lastIdx];
+
   return (
     <div style={{ padding: '30px', fontFamily: '"Courier New", Courier, monospace', backgroundColor: batColors.bgFull, color: batColors.text, minHeight: '100vh' }}>
       <h1 style={{ textTransform: 'uppercase', letterSpacing: '2px', borderBottom: `2px solid ${batColors.yellow}`, paddingBottom: '10px', display: 'inline-block' }}>
@@ -335,10 +349,16 @@ const App = () => {
         <p style={{ marginTop: '20px', opacity: 0.8 }}>
           <strong>Telemetria:</strong> {isLoading ? 'Calculando trajetória...' : `Convergência em ${iterations} iterações.`}
           {!isLoading && path.x.length > 0 && (
-            <span style={{ marginLeft: '20px', color: batColors.yellow }}>
-              Ótimo em: <strong>({path.x[path.x.length - 1].toFixed(4)}, {path.y[path.y.length - 1].toFixed(4)})</strong>
-              | Valor: <strong>{path.z[path.z.length - 1].toFixed(6)}</strong>
-            </span>
+            otimo2Dvisivel ? (
+              <span style={{ marginLeft: '20px', color: batColors.yellow }}>
+                Ótimo em: <strong>({px[lastIdx].toFixed(4)}, {py[lastIdx].toFixed(4)})</strong>
+                | Valor: <strong>{pz[lastIdx].toFixed(6)}</strong>
+              </span>
+            ) : (
+              <span style={{ marginLeft: '20px', color: batColors.error }}>
+                Divergiu — sem ótimo finito nessa direção.
+              </span>
+            )
           )}
         </p>
 
@@ -366,12 +386,17 @@ const App = () => {
                 line: { color: constraintColor, width: 6 },
                 name: 'Fronteira g = 0', hoverinfo: 'name'
               }] : []),
-              { x: path.x, y: path.y, z: path.z, type: 'scatter3d', mode: 'lines+markers', marker: { color: batColors.yellow, size: 4 }, line: { color: batColors.yellow, width: 4 }, name: 'Trajetória' },
-              { x: [path.x[path.x.length - 1]], y: [path.y[path.y.length - 1]], z: [path.z[path.z.length - 1]], type: 'scatter3d', mode: 'markers', marker: { color: '#FF0000', size: 8, symbol: 'diamond' }, name: 'Ponto Ótimo' }
+              { x: path3D.x, y: path3D.y, z: path3D.z, type: 'scatter3d', mode: 'lines+markers', connectgaps: false, marker: { color: batColors.yellow, size: 4 }, line: { color: batColors.yellow, width: 4 }, name: 'Trajetória' },
+              ...(otimo3Dvisivel ? [{ x: [px[lastIdx]], y: [py[lastIdx]], z: [pz[lastIdx]], type: 'scatter3d', mode: 'markers', marker: { color: '#FF0000', size: 8, symbol: 'diamond' }, name: 'Ponto Ótimo' }] : [])
             ]}
             layout={{
-              ...darkLayoutBase, width: 600, height: 500, title: 'Visualização Topográfica 3D', showlegend: true, legend: { x: 0, y: 1 },
-              scene: { xaxis: { range: xRange }, yaxis: { range: yRange }, zaxis: { range: zRange } }
+              ...darkLayoutBase, width: 720, height: 620, title: 'Visualização Topográfica 3D', showlegend: true, legend: { x: 0, y: 1 },
+              margin: { t: 40, b: 0, l: 0, r: 0 },
+              scene: {
+                xaxis: { range: xRange }, yaxis: { range: yRange }, zaxis: { range: zRange },
+                aspectmode: 'cube',
+                camera: { eye: { x: 1.5, y: 1.5, z: 1.1 } }
+              }
             }}
           />
 
@@ -386,11 +411,11 @@ const App = () => {
                 showscale: false, name: 'Curvas de Nível', hoverinfo: 'skip'
               },
               ...(forbiddenLegendProxy ? [forbiddenLegendProxy] : []),
-              { x: path.x, y: path.y, type: 'scatter', mode: 'lines+markers', marker: { color: batColors.yellow, size: 6 }, line: { color: batColors.yellow, width: 2 }, name: 'Deslocamento' },
-              { x: [path.x[path.x.length - 1]], y: [path.y[path.y.length - 1]], type: 'scatter', mode: 'markers', marker: { color: '#FF0000', size: 12, symbol: 'x' }, name: 'Ponto Ótimo' }
+              { x: path2D.x, y: path2D.y, type: 'scatter', mode: 'lines+markers', connectgaps: false, marker: { color: batColors.yellow, size: 6 }, line: { color: batColors.yellow, width: 2 }, name: 'Deslocamento' },
+              ...(otimo2Dvisivel ? [{ x: [px[lastIdx]], y: [py[lastIdx]], type: 'scatter', mode: 'markers', marker: { color: '#FF0000', size: 12, symbol: 'x' }, name: 'Ponto Ótimo' }] : [])
             ]}
             layout={{
-              ...darkLayoutBase, width: 600, height: 500, title: 'Mapa de Isolinhas 2D', showlegend: true, legend: { x: 0, y: 1 },
+              ...darkLayoutBase, width: 720, height: 620, title: 'Mapa de Isolinhas 2D', showlegend: true, legend: { x: 0, y: 1 },
               xaxis: { range: xRange }, yaxis: { range: yRange }
             }}
           />
@@ -400,7 +425,7 @@ const App = () => {
               { x: iterArray, y: path.z, type: 'scatter', mode: 'lines+markers', marker: { color: batColors.yellow, size: 5 }, line: { color: batColors.yellow, width: 2 } },
             ]}
             layout={{
-              ...darkLayoutBase, width: 1230, height: 400, title: 'Telemetria de Convergência (f(x,y) por Iteração)',
+              ...darkLayoutBase, width: 1470, height: 400, title: 'Telemetria de Convergência (f(x,y) por Iteração)',
               xaxis: { title: 'Iterações', gridcolor: batColors.grid, zerolinecolor: batColors.grid },
               yaxis: { title: 'Valor do Alvo', gridcolor: batColors.grid, zerolinecolor: batColors.grid }
             }}
