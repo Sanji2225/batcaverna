@@ -433,6 +433,11 @@ def rodar_direcoes_aleatorias(expressao_sympy, variaveis_sympy, objetivo, restri
 
     f_inicial = float(func(*x_atual))
     f_atual = f_inicial
+    
+    hist_x = [x_atual[0]] if n_vars > 0 else [0.0]
+    hist_y = [x_atual[1]] if n_vars > 1 else [0.0]
+    hist_z = [f_inicial]
+    
     is_max = (objetivo.lower() == 'max')
     diverged = False
 
@@ -444,25 +449,18 @@ def rodar_direcoes_aleatorias(expressao_sympy, variaveis_sympy, objetivo, restri
     # Têmpera Simulada (Simulated Annealing)
     temperatura = 1.0
     taxa_resfriamento = 0.99
-    
-    direcao_vencedora = None # Memória de Sucesso
 
     for i in range(int(max_iter)):
-        if direcao_vencedora is not None:
-            # Reutiliza a direção que gerou progresso na última iteração
-            direcao = direcao_vencedora
-        else:
-            # Sorteia e normaliza uma nova direção aleatória
-            direcao_bruta = [random.gauss(0.0, max(0.1, temperatura)) for _ in range(n_vars)]
-            norma = math.sqrt(sum(d**2 for d in direcao_bruta))
-            if norma == 0: continue
-            direcao = [d/norma for d in direcao_bruta]
+        # Sorteia e normaliza uma nova direção aleatória
+        direcao_bruta = [random.gauss(0.0, max(0.1, temperatura)) for _ in range(n_vars)]
+        norma = math.sqrt(sum(d**2 for d in direcao_bruta))
+        if norma == 0: continue
+        direcao = [d/norma for d in direcao_bruta]
             
         x_novo = [x_atual[j] + curr_step * direcao[j] for j in range(n_vars)]
         
         try:
             if restricoes_funcs and not avaliar_restricoes_compiladas(x_novo, restricoes_funcs):
-                direcao_vencedora = None # Bateu na parede, esquece a direção
                 tentativas_sem_melhora += 1
                 curr_step *= 0.95
                 if tentativas_sem_melhora > paciencia: break
@@ -474,24 +472,26 @@ def rodar_direcoes_aleatorias(expressao_sympy, variaveis_sympy, objetivo, restri
             melhorou = (delta > 1e-9) if is_max else (delta < -1e-9)
             
             aceitar_pior = False
-            if not melhorou and temperatura > 0.1 and direcao_vencedora is None:
+            if not melhorou and temperatura > 0.1:
                 p_aceitacao = math.exp(-abs(delta) / temperatura)
                 if random.random() < p_aceitacao:
                     aceitar_pior = True
             
             if melhorou or aceitar_pior:
                 x_atual, f_atual = x_novo, f_novo
+                hist_x.append(x_atual[0] if n_vars > 0 else 0.0)
+                hist_y.append(x_atual[1] if n_vars > 1 else 0.0)
+                hist_z.append(f_atual)
+                
                 # Guarda anti-divergência (função ilimitada)
                 if not math.isfinite(f_atual) or any(abs(v) > DOMINIO_LIMITE for v in x_atual):
                     diverged = True
                     break
                 if melhorou:
-                    direcao_vencedora = direcao # Memoriza o acerto para acelerar no mesmo sentido
                     tentativas_sem_melhora = 0 
                     passos_com_sucesso += 1
                     curr_step *= 1.2 # Embala na descida boa (aumenta o passo mais agressivamente)
             else:
-                direcao_vencedora = None # Direção falhou, limpa a memória
                 tentativas_sem_melhora += 1
                 curr_step *= 0.95 
         
@@ -501,11 +501,11 @@ def rodar_direcoes_aleatorias(expressao_sympy, variaveis_sympy, objetivo, restri
                 break
                 
         except (ValueError, ZeroDivisionError, TypeError): 
-            direcao_vencedora = None
             continue
 
     vars_str_list = [str(v) for v in variaveis_sympy]
     return {
+        "path": {"x": hist_x, "y": hist_y, "z": hist_z},
         "ponto_otimo": {name: val for name, val in zip(vars_str_list, x_atual)},
         "valor_otimo": float(f_atual),
         "valor_inicial": float(f_inicial),

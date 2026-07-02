@@ -104,13 +104,7 @@ const App = () => {
         setIterations(data.iterations);
         flags = data;
       } else {
-        // Para Direções Aleatórias, usamos o valor real de z inicial retornado pelo backend
-        const pt = data.result.ponto_otimo;
-        setPath({
-          x: [startPoint[0], pt.x],
-          y: [startPoint[1], pt.y],
-          z: [data.result.valor_inicial, data.result.valor_otimo]
-        });
+        setPath(data.result.path);
         setIterations(data.result.iteracoes_realizadas);
         flags = data.result;
       }
