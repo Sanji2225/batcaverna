@@ -10,9 +10,11 @@ def sanitize_and_parse(s):
     Tenta converter uma string (LaTeX, ASCII ou Math) para SymPy de forma agressiva.
     """
     if not s or not isinstance(s, str): return None
-    
-    # Remove "f(x,y) =" ou similares
-    if '=' in s:
+
+    # Remove "f(x,y) =" ou similares, mas PRESERVA desigualdades das restrições
+    # (<=, >=, ==, !=), pois elas são fundamentais para o modelo g(x,y) <= 0.
+    _rel_ops = ('<=', '>=', '==', '!=', '\\le', '\\ge', '\\leq', '\\geq', '\\neq')
+    if '=' in s and not any(op in s for op in _rel_ops):
         s = s.split('=')[-1].strip()
 
     # 1. Tenta sympify direto (notação de programação)
@@ -73,10 +75,21 @@ def process_latex_function(latex_str, constraints_latex=None):
     restricoes_sympy = []
     if constraints_latex:
         for c_latex in constraints_latex:
-            if not c_latex.strip(): continue
+            if not c_latex or not c_latex.strip(): continue
             c_expr = sanitize_and_parse(c_latex)
-            if c_expr is not None:
-                restricoes_sympy.append(c_expr)
+            if c_expr is None:
+                continue
+
+            # Normaliza qualquer relação (g >= h, g <= h, g = h) para a forma
+            # padrão do modelo: g'(x,y) <= 0. Assim o usuário pode digitar a
+            # restrição completa (ex.: "x + y >= 5") em vez de só a expressão.
+            if isinstance(c_expr, sp.core.relational.Relational):
+                if c_expr.rel_op in ('>=', '>'):
+                    c_expr = c_expr.rhs - c_expr.lhs
+                else:  # '<=', '<', '==', '!='
+                    c_expr = c_expr.lhs - c_expr.rhs
+
+            restricoes_sympy.append(c_expr)
             
     return {
         "parsed_expression": str(expressao),
@@ -87,10 +100,46 @@ def process_latex_function(latex_str, constraints_latex=None):
         "sympy_constraints": restricoes_sympy
     }
 
-def gerar_grid(expressao_sympy, variaveis_sympy, range_val=5, step=0.5):
+def _gerar_eixos(range_val=5, step=0.5):
+    """Gera o vetor de coordenadas de um eixo (compartilhado por objetivo e restrições)."""
+    vals = []
+    curr = -float(range_val)
+    while curr <= range_val:
+        vals.append(round(curr, 2))
+        curr += step
+    return vals
+
+def _avaliar_malha(func, x_vals, y_vals):
+    """
+    Avalia func(x, y) sobre a malha (linhas = y, colunas = x). Vetoriza com numpy
+    (necessário com o grid fino); cai no laço ponto-a-ponto se a expressão não
+    suportar broadcasting. Retorna um array numpy com np.nan onde não avaliou.
+    """
+    X, Y = np.meshgrid(np.array(x_vals, dtype=float), np.array(y_vals, dtype=float))
+    try:
+        with np.errstate(all='ignore'):
+            Z = func(X, Y)
+        Z = np.asarray(Z, dtype=float)
+        if Z.shape != X.shape:      # expressão constante -> resultado escalar
+            Z = np.full(X.shape, float(Z))
+        return Z
+    except Exception:
+        Z = np.empty(X.shape, dtype=float)
+        for i, yv in enumerate(y_vals):
+            for j, xv in enumerate(x_vals):
+                try:
+                    Z[i, j] = float(func(xv, yv))
+                except (ValueError, ZeroDivisionError, TypeError):
+                    Z[i, j] = np.nan
+        return Z
+
+def gerar_grid(expressao_sympy, variaveis_sympy, range_val=5, step=0.1):
     """
     Gera a malha topográfica (Grid 3D) para o frontend.
     Suporta apenas 2 variáveis (x e y).
+
+    Convenção do Plotly: z[i][j] corresponde ao ponto (x[j], y[i]).
+    Ou seja, as LINHAS variam em y e as COLUNAS variam em x.
     """
     if len(variaveis_sympy) != 2:
         return None
@@ -105,25 +154,48 @@ def gerar_grid(expressao_sympy, variaveis_sympy, range_val=5, step=0.5):
 
     func = sp.lambdify((x_sym, y_sym), expressao_sympy, modules=['numpy', 'math'])
 
-    x_vals = []
-    y_vals = []
-    curr = -float(range_val)
-    while curr <= range_val:
-        x_vals.append(round(curr, 2))
-        y_vals.append(round(curr, 2))
-        curr += step
+    x_vals = _gerar_eixos(range_val, step)
+    y_vals = _gerar_eixos(range_val, step)
 
-    z_vals = []
-    for xv in x_vals:
-        row = []
-        for yv in y_vals:
-            try:
-                row.append(float(func(xv, yv)))
-            except (ValueError, ZeroDivisionError, TypeError):
-                row.append(0.0)
-        z_vals.append(row)
+    Z = _avaliar_malha(func, x_vals, y_vals)
+    Z = np.where(np.isfinite(Z), Z, 0.0)   # buracos viram 0 (superfície contínua)
 
-    return {"x": x_vals, "y": y_vals, "z": z_vals}
+    return {"x": x_vals, "y": y_vals, "z": Z.tolist()}
+
+def gerar_grid_restricoes(restricoes_sympy, variaveis_sympy, range_val=5, step=0.1):
+    """
+    Para cada restrição g(x,y) <= 0, gera uma malha 2D com os valores de g
+    sobre o MESMO grid da função objetivo. Com isso o frontend consegue
+    desenhar a fronteira (g = 0) e sombrear a região inviável (g > 0).
+
+    Retorna uma lista de dicts: [{"latex": str, "x": [...], "y": [...], "z": [[...]]}].
+    """
+    if len(variaveis_sympy) != 2 or not restricoes_sympy:
+        return []
+
+    vars_map = {v.name: v for v in variaveis_sympy}
+    x_sym = vars_map.get('x')
+    y_sym = vars_map.get('y')
+    if not x_sym or not y_sym:
+        return []
+
+    x_vals = _gerar_eixos(range_val, step)
+    y_vals = _gerar_eixos(range_val, step)
+
+    grids = []
+    for r in restricoes_sympy:
+        try:
+            g_func = sp.lambdify((x_sym, y_sym), r, modules=['numpy', 'math'])
+        except Exception:
+            continue
+
+        Z = _avaliar_malha(g_func, x_vals, y_vals)
+        # Mantém None onde não avaliou (não cria fronteira falsa)
+        z_vals = [[(float(v) if np.isfinite(v) else None) for v in row] for row in Z]
+
+        grids.append({"latex": str(r), "x": x_vals, "y": y_vals, "z": z_vals})
+
+    return grids
 
 def avaliar_restricoes_compiladas(ponto_vals, restricoes_funcs):
     """
@@ -133,6 +205,70 @@ def avaliar_restricoes_compiladas(ponto_vals, restricoes_funcs):
         if float(r_func(*ponto_vals)) > 0:
             return False
     return True
+
+# Se o iterado escapar deste limite, consideramos que o método divergiu
+# (função ilimitada na direção de busca). Evita valores como 1e280 que
+# tornam o gráfico impossível de renderizar.
+DOMINIO_LIMITE = 1e6
+
+def _restaurar_viabilidade(ponto, restricoes_funcs, restricoes_grad_funcs, max_steps=300):
+    """
+    Métodos de direções viáveis (rejeição de passo) precisam COMEÇAR dentro da
+    região viável. Se o ponto inicial violar alguma restrição (algum g_i > 0),
+    projeta ele de volta minimizando a violação total via descida de subgradiente
+    com backtracking.
+
+    Retorna (ponto_corrigido, viavel_bool).
+    """
+    p = [float(v) for v in ponto]
+    n = len(p)
+
+    def violacao_total(q):
+        total = 0.0
+        for f in restricoes_funcs:
+            try:
+                g = float(f(*q))
+            except (ValueError, ZeroDivisionError, TypeError):
+                g = float('inf')
+            if g > 0:
+                total += g
+        return total
+
+    v = violacao_total(p)
+    if v <= 1e-9:
+        return p, True
+
+    for _ in range(max_steps):
+        # Subgradiente = soma dos gradientes das restrições atualmente violadas
+        grad = [0.0] * n
+        for f, grads in zip(restricoes_funcs, restricoes_grad_funcs):
+            try:
+                if float(f(*p)) > 0:
+                    for i in range(n):
+                        grad[i] += float(grads[i](*p))
+            except (ValueError, ZeroDivisionError, TypeError):
+                pass
+
+        norma = math.sqrt(sum(g * g for g in grad))
+        if norma < 1e-12:
+            break
+
+        direcao = [-g / norma for g in grad]
+        passo = 1.0
+        avancou = False
+        while passo > 1e-9:
+            q = [p[i] + passo * direcao[i] for i in range(n)]
+            nv = violacao_total(q)
+            if nv < v - 1e-12:
+                p, v = q, nv
+                avancou = True
+                break
+            passo *= 0.5
+
+        if not avancou or v <= 1e-9:
+            break
+
+    return p, v <= 1e-6
 
 def rodar_gradiente(expressao_sympy, variaveis_sympy, objetivo, restricoes_sympy=None, x_inicial=None, step_size=0.1, max_iter=100, tolerance=0.0001):
     """
@@ -149,9 +285,25 @@ def rodar_gradiente(expressao_sympy, variaveis_sympy, objetivo, restricoes_sympy
     dx_func = sp.lambdify((x_sym, y_sym), sp.diff(expressao_sympy, x_sym), modules=['numpy', 'math'])
     dy_func = sp.lambdify((x_sym, y_sym), sp.diff(expressao_sympy, y_sym), modules=['numpy', 'math'])
     restricoes_funcs = [sp.lambdify((x_sym, y_sym), r, modules=['numpy', 'math']) for r in restricoes_sympy]
+    restricoes_grad_funcs = [
+        [sp.lambdify((x_sym, y_sym), sp.diff(r, x_sym), modules=['numpy', 'math']),
+         sp.lambdify((x_sym, y_sym), sp.diff(r, y_sym), modules=['numpy', 'math'])]
+        for r in restricoes_sympy
+    ]
 
     curr_x, curr_y = x_inicial if x_inicial else [0.0, 0.0]
-    
+    curr_x, curr_y = float(curr_x), float(curr_y)
+
+    # Se o ponto inicial estiver fora da região viável, projeta ele para dentro
+    # antes de começar (senão o método pode "convergir" num ponto que viola g).
+    viavel = True
+    start_projetado = False
+    if restricoes_funcs:
+        ponto0 = [curr_x, curr_y]
+        (curr_x, curr_y), viavel = _restaurar_viabilidade(ponto0, restricoes_funcs, restricoes_grad_funcs)
+        start_projetado = (abs(curr_x - ponto0[0]) > 1e-9 or abs(curr_y - ponto0[1]) > 1e-9)
+
+    diverged = False
     hist_x, hist_y, hist_z = [curr_x], [curr_y], [float(f_func(curr_x, curr_y))]
     is_max = (objetivo.lower() == 'max')
     mult = 1 if is_max else -1
@@ -236,11 +388,21 @@ def rodar_gradiente(expressao_sympy, variaveis_sympy, objetivo, restricoes_sympy
         curr_x, curr_y = prox_x, prox_y
         hist_x.append(curr_x); hist_y.append(curr_y); hist_z.append(float(f_func(curr_x, curr_y)))
 
+        # Guarda anti-divergência: função ilimitada faz o ponto escapar para o
+        # infinito, gerando valores (ex.: 1e280) que quebram a renderização.
+        if (abs(curr_x) > DOMINIO_LIMITE or abs(curr_y) > DOMINIO_LIMITE
+                or not math.isfinite(hist_z[-1])):
+            diverged = True
+            break
+
     return {
         "path": {"x": hist_x, "y": hist_y, "z": hist_z},
         "iterations": len(hist_x) - 1,
         "ponto_otimo": {"x": curr_x, "y": curr_y},
-        "valor_otimo": hist_z[-1]
+        "valor_otimo": hist_z[-1],
+        "diverged": diverged,
+        "viavel": viavel,
+        "start_projetado": start_projetado
     }
     
 def rodar_direcoes_aleatorias(expressao_sympy, variaveis_sympy, objetivo, restricoes_sympy=None, x_inicial=None, step_size=0.1, max_iter=1000, tolerance=0.0001):
@@ -254,11 +416,25 @@ def rodar_direcoes_aleatorias(expressao_sympy, variaveis_sympy, objetivo, restri
 
     func = sp.lambdify(variaveis_sympy, expressao_sympy, modules=['numpy', 'math'])
     restricoes_funcs = [sp.lambdify(variaveis_sympy, r, modules=['numpy', 'math']) for r in restricoes_sympy]
-    
+    restricoes_grad_funcs = [
+        [sp.lambdify(variaveis_sympy, sp.diff(r, v), modules=['numpy', 'math']) for v in variaveis_sympy]
+        for r in restricoes_sympy
+    ]
+
     x_atual = [float(x) for x in x_inicial] if x_inicial else [0.0] * n_vars
+
+    # Projeta um ponto inicial infactível de volta para a região viável.
+    viavel = True
+    start_projetado = False
+    if restricoes_funcs:
+        ponto0 = list(x_atual)
+        x_atual, viavel = _restaurar_viabilidade(ponto0, restricoes_funcs, restricoes_grad_funcs)
+        start_projetado = any(abs(a - b) > 1e-9 for a, b in zip(x_atual, ponto0))
+
     f_inicial = float(func(*x_atual))
     f_atual = f_inicial
     is_max = (objetivo.lower() == 'max')
+    diverged = False
 
     paciencia = 80 
     tentativas_sem_melhora = 0
@@ -305,6 +481,10 @@ def rodar_direcoes_aleatorias(expressao_sympy, variaveis_sympy, objetivo, restri
             
             if melhorou or aceitar_pior:
                 x_atual, f_atual = x_novo, f_novo
+                # Guarda anti-divergência (função ilimitada)
+                if not math.isfinite(f_atual) or any(abs(v) > DOMINIO_LIMITE for v in x_atual):
+                    diverged = True
+                    break
                 if melhorou:
                     direcao_vencedora = direcao # Memoriza o acerto para acelerar no mesmo sentido
                     tentativas_sem_melhora = 0 
@@ -329,5 +509,8 @@ def rodar_direcoes_aleatorias(expressao_sympy, variaveis_sympy, objetivo, restri
         "ponto_otimo": {name: val for name, val in zip(vars_str_list, x_atual)},
         "valor_otimo": float(f_atual),
         "valor_inicial": float(f_inicial),
-        "iteracoes_realizadas": passos_com_sucesso
+        "iteracoes_realizadas": passos_com_sucesso,
+        "diverged": diverged,
+        "viavel": viavel,
+        "start_projetado": start_projetado
     }
