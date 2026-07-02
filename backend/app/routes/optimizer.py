@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from app.services.math_engine import process_latex_function, rodar_direcoes_aleatorias, rodar_gradiente, gerar_grid
+from app.services.math_engine import process_latex_function, rodar_direcoes_aleatorias, rodar_gradiente, gerar_grid, gerar_grid_restricoes
 
 optimizer_bp = Blueprint('optimizer', __name__)
 
@@ -79,6 +79,7 @@ def otimizar_direcoes_aleatorias():
         )
 
         grid = gerar_grid(expressao_sympy, variaveis_sympy)
+        grid_restricoes = gerar_grid_restricoes(restricoes_sympy, variaveis_sympy)
 
         return jsonify({
             "success": True,
@@ -86,7 +87,8 @@ def otimizar_direcoes_aleatorias():
                 "method": "Direções Aleatórias",
                 "objetivo": objetivo.upper(),
                 "result": resultado_otimizacao,
-                "grid": grid
+                "grid": grid,
+                "constraints": grid_restricoes
             }
         }), 200
 
@@ -137,6 +139,7 @@ def otimizar_gradiente():
 
         # Gera o Grid para o gráfico
         grid = gerar_grid(expressao_sympy, variaveis_sympy)
+        grid_restricoes = gerar_grid_restricoes(restricoes_sympy, variaveis_sympy)
 
         return jsonify({
             "success": True,
@@ -144,8 +147,12 @@ def otimizar_gradiente():
                 "path": resultado['path'],
                 "iterations": resultado['iterations'],
                 "grid": grid,
+                "constraints": grid_restricoes,
                 "ponto_otimo": resultado['ponto_otimo'],
-                "valor_otimo": resultado['valor_otimo']
+                "valor_otimo": resultado['valor_otimo'],
+                "diverged": resultado.get('diverged', False),
+                "viavel": resultado.get('viavel', True),
+                "start_projetado": resultado.get('start_projetado', False)
             }
         }), 200
 
