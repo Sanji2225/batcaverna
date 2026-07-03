@@ -156,58 +156,36 @@ const App = () => {
 
   const infeasibleSurface = buildInfeasibleSurface();
 
-  // Interpolação bilinear do valor da objetiva num ponto (px,py) qualquer do grid.
-  const bilinear = (gz, xs, ys, px, py) => {
-    const nx = xs.length, ny = ys.length;
-    if (nx < 2 || ny < 2) return null;
-    const stepx = (xs[nx - 1] - xs[0]) / (nx - 1);
-    const stepy = (ys[ny - 1] - ys[0]) / (ny - 1);
-    const j0 = Math.max(0, Math.min(nx - 2, Math.floor((px - xs[0]) / stepx)));
-    const i0 = Math.max(0, Math.min(ny - 2, Math.floor((py - ys[0]) / stepy)));
-    const tj = (px - xs[j0]) / stepx, ti = (py - ys[i0]) / stepy;
-    const z00 = gz[i0]?.[j0], z10 = gz[i0]?.[j0 + 1], z01 = gz[i0 + 1]?.[j0], z11 = gz[i0 + 1]?.[j0 + 1];
-    if ([z00, z10, z01, z11].some(v => v == null)) return null;
-    return z00 * (1 - tj) * (1 - ti) + z10 * tj * (1 - ti) + z01 * (1 - tj) * ti + z11 * tj * ti;
-  };
-
-  // Fronteira g = 0 como CURVA suave sobre a superfície (marching squares + z bilinear).
-  // Dá um anel contínuo em vez da borda "em escada" do overlay mascarado.
-  const buildConstraintRings3D = () => {
-    if (!grid.z || !grid.z.length || !constraints.length) return null;
-    const xs = grid.x, ys = grid.y;
-    const xr = [], yr = [], zr = [];
+  // Parede 3D real da restrição: extruda a curva g(x,y)=0 (já traçada e
+  // ordenada pelo backend via marching squares/contourpy) na vertical, de
+  // zMin a zMax. Extrudar uma curva na vertical produz automaticamente a
+  // forma geométrica correspondente: reta -> plano, círculo -> cilindro,
+  // elipse -> cilindro elíptico, hipérbole -> duas cascas curvas, etc. — sem
+  // precisar identificar o tipo da restrição, a extrusão já faz isso sozinha.
+  const buildConstraintWalls3D = (zLo, zHi) => {
+    if (!constraints.length || !Number.isFinite(zLo) || !Number.isFinite(zHi)) return [];
+    const walls = [];
+    let legendaUsada = false;
     constraints.forEach(c => {
-      const z = c.z; if (!z) return;
-      for (let i = 0; i < ys.length - 1; i++) {
-        for (let j = 0; j < xs.length - 1; j++) {
-          const corners = [
-            { v: z[i]?.[j],         x: xs[j],     y: ys[i] },
-            { v: z[i]?.[j + 1],     x: xs[j + 1], y: ys[i] },
-            { v: z[i + 1]?.[j + 1], x: xs[j + 1], y: ys[i + 1] },
-            { v: z[i + 1]?.[j],     x: xs[j],     y: ys[i + 1] },
-          ];
-          if (corners.some(k => k.v == null)) continue;
-          const pts = [];
-          for (let e = 0; e < 4; e++) {
-            const a = corners[e], b = corners[(e + 1) % 4];
-            if ((a.v < 0 && b.v >= 0) || (a.v >= 0 && b.v < 0)) {
-              const t = (0 - a.v) / (b.v - a.v);
-              pts.push({ x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) });
-            }
-          }
-          for (let p = 0; p + 1 < pts.length; p += 2) {
-            [pts[p], pts[p + 1]].forEach(pt => {
-              const zz = bilinear(grid.z, xs, ys, pt.x, pt.y);
-              xr.push(pt.x); yr.push(pt.y); zr.push(zz == null ? null : zz);
-            });
-            xr.push(null); yr.push(null); zr.push(null); // quebra entre segmentos
-          }
-        }
-      }
+      (c.curva || []).forEach(seg => {
+        if (!seg.x || seg.x.length < 2) return;
+        walls.push({
+          type: 'surface',
+          x: [seg.x, seg.x],
+          y: [seg.y, seg.y],
+          z: [seg.x.map(() => zLo), seg.x.map(() => zHi)],
+          showscale: false,
+          opacity: 0.4,
+          colorscale: [[0, constraintColor], [1, constraintColor]],
+          name: 'Restrição g = 0 (parede)',
+          showlegend: !legendaUsada,
+          hoverinfo: 'skip'
+        });
+        legendaUsada = true;
+      });
     });
-    return xr.length ? { x: xr, y: yr, z: zr } : null;
+    return walls;
   };
-  const constraintRing = buildConstraintRings3D();
 
   // Zona proibida (g > 0) como CONTORNO PREENCHIDO. Diferente do heatmap (que
   // pinta célula por célula e sai quadriculado), o contorno interpola a fronteira
@@ -249,6 +227,7 @@ const App = () => {
     if (v != null && Number.isFinite(v)) { if (v < zMin) zMin = v; if (v > zMax) zMax = v; }
   }));
   const zRange = Number.isFinite(zMin) && Number.isFinite(zMax) ? [zMin, zMax] : undefined;
+  const constraintWalls = buildConstraintWalls3D(zMin, zMax);
 
   // Recorta a trajetória ao domínio visível. No 3D o Plotly NÃO recorta scatter
   // pelo range dos eixos: se a busca diverge (max ilimitado), pontos em ~1e12
@@ -376,12 +355,7 @@ const App = () => {
                 colorscale: [[0, constraintColor], [1, constraintColor]],
                 name: 'Região Inviável', hoverinfo: 'name'
               }] : []),
-              ...(constraintRing ? [{
-                x: constraintRing.x, y: constraintRing.y, z: constraintRing.z,
-                type: 'scatter3d', mode: 'lines',
-                line: { color: constraintColor, width: 6 },
-                name: 'Fronteira g = 0', hoverinfo: 'name'
-              }] : []),
+              ...constraintWalls,
               { x: path3D.x, y: path3D.y, z: path3D.z, type: 'scatter3d', mode: 'lines+markers', connectgaps: false, marker: { color: batColors.yellow, size: 4 }, line: { color: batColors.yellow, width: 4 }, name: 'Trajetória' },
               ...(otimo3Dvisivel ? [{ x: [px[lastIdx]], y: [py[lastIdx]], z: [pz[lastIdx]], type: 'scatter3d', mode: 'markers', marker: { color: '#FF0000', size: 8, symbol: 'diamond' }, name: 'Ponto Ótimo' }] : [])
             ]}

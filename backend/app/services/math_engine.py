@@ -2,6 +2,7 @@ import math
 import random
 import numpy as np
 import sympy as sp
+import contourpy
 from sympy.parsing.latex import parse_latex
 from sympy.parsing.latex.errors import LaTeXParsingError
 
@@ -168,7 +169,15 @@ def gerar_grid_restricoes(restricoes_sympy, variaveis_sympy, range_val=5, step=0
     sobre o MESMO grid da função objetivo. Com isso o frontend consegue
     desenhar a fronteira (g = 0) e sombrear a região inviável (g > 0).
 
-    Retorna uma lista de dicts: [{"latex": str, "x": [...], "y": [...], "z": [[...]]}].
+    Também traça a curva de nível g = 0 já ORDENADA (marching squares via
+    contourpy), em uma ou mais polilinhas (uma restrição pode ter múltiplos
+    ramos desconexos, ex.: hipérbole). O frontend extrude essa curva na
+    vertical para desenhar a restrição com sua forma geométrica real (reta
+    extrudada = plano, círculo extrudado = cilindro, etc.), em vez de
+    projetá-la sobre a altura da função objetivo.
+
+    Retorna uma lista de dicts:
+    [{"latex": str, "x": [...], "y": [...], "z": [[...]], "curva": [{"x": [...], "y": [...]}, ...]}].
     """
     if len(variaveis_sympy) != 2 or not restricoes_sympy:
         return []
@@ -190,10 +199,22 @@ def gerar_grid_restricoes(restricoes_sympy, variaveis_sympy, range_val=5, step=0
             continue
 
         Z = _avaliar_malha(g_func, x_vals, y_vals)
-        # Mantém None onde não avaliou (não cria fronteira falsa)
+
+        # Traça g = 0 sobre a malha bruta (com NaN) ANTES de sanitizar para
+        # None abaixo — o contourpy já ignora células com NaN.
+        curva = []
+        try:
+            cg = contourpy.contour_generator(x=x_vals, y=y_vals, z=Z)
+            for linha in cg.lines(0.0):
+                if len(linha) >= 2:
+                    curva.append({"x": linha[:, 0].tolist(), "y": linha[:, 1].tolist()})
+        except Exception:
+            pass
+
+        # Mantém None onde não avaliou (não cria fronteira falsa no heatmap)
         z_vals = [[(float(v) if np.isfinite(v) else None) for v in row] for row in Z]
 
-        grids.append({"latex": str(r), "x": x_vals, "y": y_vals, "z": z_vals})
+        grids.append({"latex": str(r), "x": x_vals, "y": y_vals, "z": z_vals, "curva": curva})
 
     return grids
 
